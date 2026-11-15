@@ -202,6 +202,23 @@ describe('api/log handler', () => {
     errSpy.mockRestore()
   })
 
+  it('берёт уже распарсенное тело из req.body (рантайм Vercel), поток пуст → 204', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Vercel (@vercel/node) парсит JSON сам, поток к этому моменту вычитан:
+    // без чтения req.body валидный запрос получал 400 в проде.
+    const req = {
+      method: 'POST',
+      headers: { origin: PROD },
+      body: { message: 'preparsed', stack: 'at x' },
+      async *[Symbol.asyncIterator]() {},
+    } as unknown as IncomingMessage
+    const res = await call(req)
+    expect(res.statusCode).toBe(204)
+    const line = errSpy.mock.calls[0]?.[1] as string
+    expect(JSON.parse(line)).toEqual({ message: 'preparsed', stack: 'at x' })
+    errSpy.mockRestore()
+  })
+
   it('превью-домен skvot-*-blindfoldstudios разрешён', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const res = await call(mockReq({ origin: PREVIEW, body: '{"message":"m"}' }))

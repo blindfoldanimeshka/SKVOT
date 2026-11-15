@@ -115,6 +115,22 @@ async function readBody(req: IncomingMessage): Promise<string | null> {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+/**
+ * Достаёт тело запроса. На Vercel рантайм (@vercel/node) парсит JSON заранее и
+ * кладёт результат в `req.body`, а поток к этому моменту уже вычитан — поэтому
+ * сначала смотрим в `req.body`, и только потом читаем поток (тесты, другие рантаймы).
+ * Иначе валидные запросы приходили пустыми и получали 400.
+ */
+async function getRawBody(req: IncomingMessage): Promise<string | null> {
+  const withBody = req as IncomingMessage & { body?: unknown }
+  if (typeof withBody.body === 'string') return withBody.body
+  if (withBody.body !== undefined && withBody.body !== null) {
+    const serialized = JSON.stringify(withBody.body)
+    return serialized === undefined ? null : serialized
+  }
+  return readBody(req)
+}
+
 function finish(res: ServerResponse, status: number, headers: Record<string, string>): void {
   for (const [key, value] of Object.entries(headers)) res.setHeader(key, value)
   res.statusCode = status
@@ -125,7 +141,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   const method = req.method ?? 'GET'
   const originHeader = req.headers.origin
   const origin = typeof originHeader === 'string' ? originHeader : null
-
   const corsHeaders: Record<string, string> = { Vary: 'Origin' }
   if (origin !== null && isAllowedOrigin(origin)) {
     corsHeaders['Access-Control-Allow-Origin'] = origin
@@ -157,12 +172,12 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
 
     let raw: string | null
     try {
-      raw = await readBody(req)
+      raw = await getRawBody(req)
     } catch {
       finish(res, 400, corsHeaders)
       return
     }
-    if (raw === null) {
+    if (raw === null || Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) {
       finish(res, 413, corsHeaders)
       return
     }

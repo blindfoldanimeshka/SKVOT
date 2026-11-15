@@ -27,7 +27,11 @@ export function ListingCardCarousel({ urls, alt }: ListingCardCarouselProps) {
     if (touchStart.current === null) return
     const diff = touchStart.current - e.changedTouches[0].clientX
     if (Math.abs(diff) > 40) {
-      diff > 0 ? next() : prev()
+      if (diff > 0) {
+        next()
+      } else {
+        prev()
+      }
     }
     touchStart.current = null
   }
@@ -58,6 +62,7 @@ export function ListingCardCarousel({ urls, alt }: ListingCardCarouselProps) {
               src={url}
               alt={i === index ? alt : ''}
               loading={i === index ? 'eager' : 'lazy'}
+              decoding="async"
               className="h-full w-full object-cover"
             />
           </div>

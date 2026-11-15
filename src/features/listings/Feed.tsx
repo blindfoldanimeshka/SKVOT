@@ -1,5 +1,5 @@
-import { useEffect, useState, type SetStateAction } from 'react'
-import { motion } from 'motion/react'
+import { useEffect, useRef, useState, type SetStateAction } from 'react'
+import { motion, useReducedMotion } from 'motion/react'
 import type { Database } from '@/types/database'
 import type { ListingFilters } from './types'
 import { listListings, recordListingView } from './api'
@@ -21,6 +21,12 @@ const ROOMS_OPTIONS: { value: string; label: string }[] = [
 ]
 
 const PAGE_SIZE = 10
+
+/** Задержка коммита текста города в фильтры: поле остаётся мгновенным,
+ *  а запрос в Supabase уходит, когда пользователь остановился печатать. */
+const CITY_DEBOUNCE_MS = 300
+
+const flushNoop = () => undefined
 
 interface FeedProps {
   onOpen: (listing: ListingRow) => void
@@ -48,11 +54,54 @@ export function Feed({
     const next = typeof value === 'function' ? value(filters) : value
     ;(propsOnFiltersChange ?? setInternalFilters)(next)
   }
+
+  // Локальный текст поля «Город»: ввод мгновенный, в filters коммитим по debounce.
+  const [cityInput, setCityInput] = useState(filters.city ?? '')
+  // Последнее значение города, которое мы сами закоммитили в filters —
+  // позволяет отличить наше обновление от внешнего (сброс, история навигации).
+  const committedCityRef = useRef<string | undefined>(filters.city)
+  // Ожидающий коммит города: вызывает его таймер, и cleanup эффекта при unmount.
+  const pendingCityFlushRef = useRef<() => void>(flushNoop)
+
+  // Если компонент размонтируется раньше таймера (набран город и сразу открыт
+  // карточка) — коммитим город, чтобы filters пережил возврат назад.
+  useEffect(() => () => pendingCityFlushRef.current(), [])
+
+  // Внешнее изменение filters (кнопка сброса, навигация) — подтягиваем в локальное поле.
+  useEffect(() => {
+    if (filters.city !== committedCityRef.current) {
+      committedCityRef.current = filters.city
+      setCityInput(filters.city ?? '')
+    }
+  }, [filters.city])
+
+  // Debounce города. В deps — весь `filters`: если за время ожидания
+  // изменились другие фильтры, таймер перезапускается со свежим замыканием
+  // и коммит не откатит их на старом значении.
+  useEffect(() => {
+    const city = cityInput || undefined
+    if (city === filters.city) {
+      committedCityRef.current = city
+      pendingCityFlushRef.current = flushNoop
+      return
+    }
+    const timer = setTimeout(flushCity, CITY_DEBOUNCE_MS)
+    function flushCity() {
+      clearTimeout(timer)
+      pendingCityFlushRef.current = flushNoop
+      committedCityRef.current = city
+      updateFilter({ city })
+    }
+    pendingCityFlushRef.current = flushCity
+    return () => clearTimeout(timer)
+  }, [cityInput, filters])
+
   const [listings, setListings] = useState<ListingRow[]>([])
   const [photoMap, setPhotoMap] = useState<Record<string, string[]>>({})
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const reducedMotion = useReducedMotion()
 
   useEffect(() => {
     let active = true
@@ -163,8 +212,8 @@ export function Feed({
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Город</span>
           <input
             type="text"
-            value={filters.city ?? ''}
-            onChange={(event) => updateFilter({ city: event.target.value || undefined })}
+            value={cityInput}
+            onChange={(event) => setCityInput(event.target.value)}
             placeholder="Например, Москва"
             className={`${inputClass} mt-1 w-full`}
           />
@@ -241,29 +290,43 @@ export function Feed({
 
       {!loading && !error && listings.length > 0 && (
         <>
-          <motion.div
-            className="grid grid-cols-1 gap-6 rounded-2xl bg-card p-4 sm:grid-cols-2 sm:p-6 lg:grid-cols-3 lg:gap-8 lg:p-8"
-          >
-            {listings.map((listing, i) => (
-              <motion.div
-                key={listing.id}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{
-                  type: 'spring',
-                  stiffness: 400,
-                  damping: 30,
-                  delay: Math.min(i * 0.04, 0.3),
-                }}
-              >
+          {/* Plain grid: it never animated anything, but as a motion component it
+              mounted its own visual element and subscribed to the motion/presence
+              context on every feed render. */}
+          <div className="grid grid-cols-1 gap-6 rounded-2xl bg-card p-4 sm:grid-cols-2 sm:p-6 lg:grid-cols-3 lg:gap-8 lg:p-8">
+            {listings.map((listing, i) =>
+              reducedMotion ? (
+                /* Keys stay `listing.id` on both branches, so a card that survives a
+                   filter/page change keeps its DOM node instead of remounting. */
                 <ListingCard
+                  key={listing.id}
                   listing={listing}
                   photoUrls={photoMap[listing.id]}
                   onOpen={handleOpen}
                 />
-              </motion.div>
-            ))}
-          </motion.div>
+              ) : (
+                /* opacity + transform only — no layout properties, so the browser
+                   never re-lays out the grid while the cards animate in. */
+                <motion.div
+                  key={listing.id}
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 400,
+                    damping: 30,
+                    delay: Math.min(i * 0.04, 0.3),
+                  }}
+                >
+                  <ListingCard
+                    listing={listing}
+                    photoUrls={photoMap[listing.id]}
+                    onOpen={handleOpen}
+                  />
+                </motion.div>
+              ),
+            )}
+          </div>
 
           <Pagination
             page={page}

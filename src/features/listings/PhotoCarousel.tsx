@@ -41,7 +41,11 @@ export function PhotoCarousel({ urls, alt, onImageClick, className = '' }: Photo
     if (touchStart.current === null) return
     const diff = touchStart.current - e.changedTouches[0].clientX
     if (Math.abs(diff) > 40) {
-      diff > 0 ? next() : prev()
+      if (diff > 0) {
+        next()
+      } else {
+        prev()
+      }
     }
     touchStart.current = null
   }
@@ -80,6 +84,7 @@ export function PhotoCarousel({ urls, alt, onImageClick, className = '' }: Photo
               src={url}
               alt={i === index ? alt : ''}
               loading={i === index ? 'eager' : 'lazy'}
+              decoding="async"
               className={`h-full w-full object-cover ${onImageClick ? 'cursor-pointer' : ''}`}
               onClick={handleImageClick}
             />

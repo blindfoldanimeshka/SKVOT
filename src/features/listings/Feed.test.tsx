@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const listing = {
@@ -57,5 +57,40 @@ describe('Feed', () => {
     render(<Feed onOpen={() => {}} />)
 
     await waitFor(() => expect(screen.getByText('Упс, ошибка')).toBeInTheDocument())
+  })
+
+  it('debounces the city filter and keeps the input instant', async () => {
+    listListings.mockResolvedValue({ data: [], error: null, count: 0 })
+    const { Feed } = await import('./Feed')
+
+    vi.useFakeTimers()
+    try {
+      render(<Feed onOpen={() => {}} />)
+      await act(async () => {}) // добиваем начальный запрос
+
+      const input = screen.getByPlaceholderText('Например, Москва') as HTMLInputElement
+      fireEvent.change(input, { target: { value: 'Пит' } })
+      fireEvent.change(input, { target: { value: 'Питер' } })
+
+      // Поле мгновенное — текст уже в инпуте…
+      expect(input.value).toBe('Питер')
+      // …но кроме начального ни одного запроса не ушло.
+      expect(listListings).toHaveBeenCalledTimes(1)
+
+      act(() => {
+        vi.advanceTimersByTime(299)
+      })
+      expect(listListings).toHaveBeenCalledTimes(1)
+
+      act(() => {
+        vi.advanceTimersByTime(1)
+      })
+      await act(async () => {})
+
+      expect(listListings).toHaveBeenCalledTimes(2)
+      expect(listListings).toHaveBeenLastCalledWith({ city: 'Питер' }, 0, 10)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

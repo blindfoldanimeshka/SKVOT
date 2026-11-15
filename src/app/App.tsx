@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, Suspense, lazy } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { SearchIcon } from '@/components/icons/search'
 import { PlusIcon } from '@/components/icons/plus'
 import { HomeIcon } from '@/components/icons/home'
@@ -30,30 +30,39 @@ const LegalScreen = lazy(() => import('@/app/screens/LegalScreen').then((m) => (
 // Eager-loaded landing screen
 import { HomeFeed } from '@/app/screens/HomeFeed'
 
-// Fade in/out page transition — clean, no directional slide
+// Fade-only page transition.
+// `scale` is deliberately gone: scaling the whole page subtree (it holds
+// backdrop-blur chips and layered shadows) makes the compositor re-raster those
+// layers every frame — the single most expensive thing on a low-end GPU.
+// `mode="wait"` below runs exit → enter sequentially, so durations are kept
+// small: 0.1s out + 0.16s in ≈ 0.26s total swap (was 0.25 + 0.25 = 0.5s).
 const pageVariants = {
-  initial: { opacity: 0, scale: 0.98 },
-  animate: { opacity: 1, scale: 1 },
-  exit: { opacity: 0, scale: 1.02 },
-}
-
-const pageTransition = {
-  duration: 0.25,
-  ease: [0.22, 1, 0.36, 1] as const, // --ease-smooth
+  initial: { opacity: 0 },
+  animate: { opacity: 1, transition: { duration: 0.16, ease: 'easeOut' as const } },
+  exit: { opacity: 0, transition: { duration: 0.1, ease: 'easeIn' as const } },
 }
 
 function PageTransition({ children }: { children: React.ReactNode }) {
+  const reducedMotion = useReducedMotion()
+  // With reduced motion there is no motion component at all, so nothing keeps
+  // the old page mounted (see PageStack below).
+  if (reducedMotion) return <>{children}</>
+
   return (
-    <motion.div
-      variants={pageVariants}
-      initial="initial"
-      animate="animate"
-      exit="exit"
-      transition={pageTransition}
-    >
+    <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit">
       {children}
     </motion.div>
   )
+}
+
+// AnimatePresence is only mounted when motion is allowed: it delays every page
+// swap by one extra commit even when its children have no exit animation.
+// `children` must stay a *flat JSX list* of keyed <PageTransition> elements —
+// wrapping them in a fragment would hide the keys from AnimatePresence and
+// silently kill exit animations.
+function PageStack({ animated, children }: { animated: boolean; children: React.ReactNode }) {
+  if (!animated) return <>{children}</>
+  return <AnimatePresence mode="wait">{children}</AnimatePresence>
 }
 
 type ListingRow = Database['public']['Tables']['listings']['Row']
@@ -142,6 +151,7 @@ function AppContent() {
   const { current, push: navPush, back, reset } = useNav()
   const [showNotifications, setShowNotifications] = useState(false)
   const unread = useUnreadCounts()
+  const reducedMotion = useReducedMotion()
 
   // Direction tracking: monotonic depth counter
   const depthRef = useRef(0)
@@ -204,7 +214,7 @@ function AppContent() {
   )
 
   return (
-    <AnimatePresence mode="wait">
+    <PageStack animated={!reducedMotion}>
       {current.view === 'privacy' && (
         <PageTransition key={current.key}>
           <Suspense fallback={SuspenseFallback}>
@@ -349,7 +359,7 @@ function AppContent() {
           </AppShell>
         </PageTransition>
       )}
-    </AnimatePresence>
+    </PageStack>
   )
 }
 

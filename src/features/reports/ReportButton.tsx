@@ -26,11 +26,15 @@ const panelTransition = {
 interface ReportButtonProps {
   targetType: ReportTargetType
   targetId: string
+  // Отложенная авторизация: без сессии не отправляем запрос, а просим вход
+  // (колбэк даёт App.tsx). Без колбэка (чат-треды — всегда залогинены)
+  // поведение прежнее.
+  requireAuth?: (hint: string) => void
 }
 
 type Status = 'idle' | 'sending' | 'success' | 'error'
 
-export function ReportButton({ targetType, targetId }: ReportButtonProps) {
+export function ReportButton({ targetType, targetId, requireAuth }: ReportButtonProps) {
   const { user } = useAuth()
   const [open, setOpen] = useState(false)
   const [category, setCategory] = useState(CATEGORIES[0])
@@ -42,9 +46,17 @@ export function ReportButton({ targetType, targetId }: ReportButtonProps) {
   const parsed = reportFormSchema.safeParse({ targetType, category, comment })
   const isValid = parsed.success
 
+  function requestLogin() {
+    requireAuth?.('Войдите, чтобы пожаловаться')
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
-    if (!isValid || !user || status === 'sending') return
+    if (!isValid || status === 'sending') return
+    if (!user) {
+      requestLogin()
+      return
+    }
 
     setStatus('sending')
     setMessage(null)
@@ -76,7 +88,15 @@ export function ReportButton({ targetType, targetId }: ReportButtonProps) {
       {!open && status !== 'success' && (
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            // Гостю не показываем форму, которую он не сможет отправить:
+            // сразу просим вход.
+            if (!user) {
+              requestLogin()
+              return
+            }
+            setOpen(true)
+          }}
           className="text-xs font-medium text-muted-foreground underline-offset-2 transition hover:text-primary hover:underline"
         >
           Пожаловаться

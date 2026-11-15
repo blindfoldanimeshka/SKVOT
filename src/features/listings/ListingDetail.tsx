@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getListing, boostListing } from './api'
 import { listPhotos, getPublicUrl } from '@/features/photos/photoApi'
 import { getMockPhotoUrls } from './mockPhotos'
@@ -29,9 +29,20 @@ interface ListingDetailProps {
   id: string
   onBack: () => void
   onStartChat?: (chatId: string) => void
+  // Отложенная авторизация (реализует App.tsx): без сессии экран не сам
+  // просит вход, а прокидывает намерение наверх — сохранив текущий экран
+  // и, для чата, отметку «продолжить действие» (resume: 'chat').
+  requireAuth?: (opts: { hint: string; resume?: 'chat' | null }) => void
+  resumeStartChat?: boolean
 }
 
-export function ListingDetail({ id, onBack, onStartChat }: ListingDetailProps) {
+export function ListingDetail({
+  id,
+  onBack,
+  onStartChat,
+  requireAuth,
+  resumeStartChat,
+}: ListingDetailProps) {
   const { user } = useAuth()
   const [listing, setListing] = useState<ListingRow | null>(null)
   const [photos, setPhotos] = useState<string[]>([])
@@ -81,6 +92,11 @@ export function ListingDetail({ id, onBack, onStartChat }: ListingDetailProps) {
 
   async function handleStartChat() {
     if (!listing || !onStartChat) return
+    // Гость не шлёт запрос в Supabase — просим вход и продолжаем после него.
+    if (!user) {
+      requireAuth?.({ hint: 'Войдите, чтобы написать автору', resume: 'chat' })
+      return
+    }
     setChatLoading(true)
     setChatError(null)
     const result = await openOrCreateChat(listing.id)
@@ -91,6 +107,18 @@ export function ListingDetail({ id, onBack, onStartChat }: ListingDetailProps) {
     }
     onStartChat(result.data)
   }
+
+  // Продолжение после входа: App возвращает нас на это же объявление с
+  // флагом resumeStartChat — как только данные загрузились и сессия есть,
+  // сами нажимаем «Написать автору» (один раз, с защитой от перезапуска
+  // при перерендерах и ошибке загрузки).
+  const resumeHandledRef = useRef(false)
+  useEffect(() => {
+    if (!resumeStartChat || resumeHandledRef.current) return
+    if (!user || loading || error || !listing) return
+    resumeHandledRef.current = true
+    void handleStartChat()
+  }, [resumeStartChat, user, loading, error, listing])
 
   async function handleBoost() {
     if (!listing) return
@@ -247,8 +275,9 @@ export function ListingDetail({ id, onBack, onStartChat }: ListingDetailProps) {
               </div>
             )}
 
-            {/* CTA — primary accent */}
-            {user && listing.author_id !== user.id && onStartChat && (
+            {/* CTA — primary accent. Видна и гостю: клик без сессии
+                открывает вход, а не слать запрос в пустоту. */}
+            {onStartChat && (!user || listing.author_id !== user.id) && (
               <div className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-primary/90 p-6 text-white shadow-lg transition-all duration-300 hover:shadow-xl">
                 <div className="absolute -bottom-10 -right-10 h-40 w-40 rounded-full bg-white/5 transition-all duration-500 group-hover:scale-110" />
                 <p className="relative text-xs font-medium uppercase tracking-wide opacity-70">Связаться</p>
@@ -298,7 +327,11 @@ export function ListingDetail({ id, onBack, onStartChat }: ListingDetailProps) {
                   <p className="text-xs text-muted-foreground">Помогите нам улучшить сервис</p>
                 </div>
               </div>
-              <ReportButton targetType="listing" targetId={listing.id} />
+              <ReportButton
+                targetType="listing"
+                targetId={listing.id}
+                requireAuth={requireAuth ? (hint) => requireAuth({ hint }) : undefined}
+              />
             </div>
           </div>
 

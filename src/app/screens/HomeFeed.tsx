@@ -11,6 +11,9 @@ type ListingRow = Database['public']['Tables']['listings']['Row']
 interface HomeFeedProps {
   onOpen: (listing: ListingRow) => void
   onCreate?: () => void
+  // Анониму баннер «Подтвердите email» не показываем: он относится только
+  // к залогиненному, но ещё не подтверждённому пользователю.
+  isAuthenticated: boolean
   userEmailConfirmed: boolean
   isSupabaseConfigured: boolean
   showNotifications: boolean
@@ -22,6 +25,7 @@ interface HomeFeedProps {
 export function HomeFeed({
   onOpen,
   onCreate,
+  isAuthenticated,
   userEmailConfirmed,
   isSupabaseConfigured,
   showNotifications,
@@ -42,7 +46,7 @@ export function HomeFeed({
         page={page}
         onPageChange={setPage}
       />
-      {!userEmailConfirmed && (
+      {isAuthenticated && !userEmailConfirmed && (
         <p className="mt-6 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950">
           Подтвердите email, чтобы публиковать объявления.
         </p>

@@ -36,7 +36,13 @@ const unreadStub: ReturnType<typeof useUnreadCounts> = {
   setMyChats: vi.fn(),
 }
 
-function Harness() {
+function Harness({
+  isAuthenticated = true,
+  userEmailConfirmed = true,
+}: {
+  isAuthenticated?: boolean
+  userEmailConfirmed?: boolean
+} = {}) {
   const nav = useNav()
   return (
     <>
@@ -48,7 +54,8 @@ function Harness() {
       </button>
       <HomeFeed
         onOpen={() => {}}
-        userEmailConfirmed
+        isAuthenticated={isAuthenticated}
+        userEmailConfirmed={userEmailConfirmed}
         isSupabaseConfigured
         showNotifications={false}
         unread={unreadStub}
@@ -90,5 +97,31 @@ describe('HomeFeed nav persistence', () => {
         'Питер',
       ),
     )
+  })
+
+  it('hides the email banner for anonymous users', async () => {
+    render(
+      <NavigationProvider>
+        <Harness isAuthenticated={false} userEmailConfirmed={false} />
+      </NavigationProvider>,
+    )
+
+    await screen.findByRole('heading', { name: 'Объявления' })
+    expect(
+      screen.queryByText(/подтвердите email/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows the email banner for a logged-in unconfirmed user', async () => {
+    render(
+      <NavigationProvider>
+        <Harness isAuthenticated userEmailConfirmed={false} />
+      </NavigationProvider>,
+    )
+
+    await screen.findByRole('heading', { name: 'Объявления' })
+    expect(
+      screen.getByText(/подтвердите email, чтобы публиковать объявления/i),
+    ).toBeInTheDocument()
   })
 })

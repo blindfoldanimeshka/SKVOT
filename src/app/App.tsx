@@ -86,6 +86,27 @@ const NAV_ITEMS: MenuBarItem[] = [
   { key: 'profile', label: 'Профиль', icon: UserIcon },
 ]
 
+// Отложенная авторизация: читать проект можно без входа, вход требуется
+// только на действиях. Клик по такому действию открывает экран входа как
+// обычный view стека (не модалку) и запоминает намерение — куда вернуться
+// после входа (view + params) и что автоматически продолжить (resume).
+type AuthResume = 'chat' | null
+
+interface AuthIntent {
+  view: View
+  params?: NavParams
+  hint: string
+  resume?: AuthResume
+}
+
+const AUTH_VIEW_HINTS: Partial<Record<View, string>> = {
+  new: 'Войдите, чтобы подать объявление',
+  mine: 'Войдите, чтобы посмотреть свои объявления',
+  chats: 'Войдите, чтобы открыть чаты',
+  thread: 'Войдите, чтобы открыть переписку',
+  profile: 'Войдите, чтобы открыть профиль',
+}
+
 function MenuNav({
   view,
   onNavigate,
@@ -150,6 +171,11 @@ function AppContent() {
   const { session, user, isLoading } = useAuth()
   const { current, push: navPush, back, reset } = useNav()
   const [showNotifications, setShowNotifications] = useState(false)
+  const [authIntent, setAuthIntent] = useState<AuthIntent | null>(null)
+  // Действие, которое надо автоматически продолжить после входа (сейчас —
+  // «Написать автору» на экране объявления). Живёт ровно на одной записи
+  // стека; при смене экрана снимается (см. эффект ниже).
+  const [resumeChat, setResumeChat] = useState(false)
   const unread = useUnreadCounts()
   const reducedMotion = useReducedMotion()
 
@@ -170,12 +196,54 @@ function AppContent() {
   }
 
   useEffect(() => {
-    if (!session) reset()
+    if (!session) {
+      reset()
+      // Выход из аккаунта: неотвеченный экран входа и незавершённое
+      // resume-действие относились к прежней сессии — снимаем их.
+      setAuthIntent(null)
+      setResumeChat(false)
+    }
   }, [session, reset])
+
+  // Возврат из отложенной авторизации: как только сессия появилась —
+  // уходим с экрана входа на запомненный экран и, если намерение просило
+  // продолжение, размечаем его. Для чата само действие перезапускает уже
+  // ListingDetail, когда данные объявления загрузятся.
+  useEffect(() => {
+    if (!session || !authIntent) return
+    const intent = authIntent
+    setAuthIntent(null)
+    if (intent.view !== current.view) push(intent.view, intent.params)
+    if (intent.resume === 'chat') setResumeChat(true)
+  }, [session, authIntent, current.view, current.params, push])
+
+  // Resume-флаг привязан к конкретной записи стека: уход с экрана (новый
+  // key) снимает его, чтобы действие не повторилось при следующем визите.
+  useEffect(() => {
+    setResumeChat(false)
+  }, [current.key])
 
   function navigate(next: View) {
     if (current.view === next) return
+    const hint = AUTH_VIEW_HINTS[next]
+    if (!session && hint) {
+      setAuthIntent({ view: next, hint })
+      return
+    }
     push(next)
+  }
+
+  // Колбэк для экранных действий («Написать автору», «Пожаловаться»):
+  // без сессии открывает вход поверх текущего экрана; после входа человек
+  // возвращается туда, где был, и (для resume) действие продолжается само.
+  function requestAuth(opts: { hint: string; resume?: AuthResume }) {
+    if (session) return
+    setAuthIntent({
+      view: current.view,
+      params: current.params,
+      hint: opts.hint,
+      resume: opts.resume ?? null,
+    })
   }
 
   function openDetail(listing: ListingRow) {
@@ -189,6 +257,13 @@ function AppContent() {
   }
 
   function toggleNotifications() {
+    if (!session) {
+      setAuthIntent({
+        view: 'chats',
+        hint: AUTH_VIEW_HINTS.chats ?? 'Войдите, чтобы открыть чаты',
+      })
+      return
+    }
     setShowNotifications((prev) => !prev)
     if (current.view !== 'chats') push('chats')
   }
@@ -201,9 +276,18 @@ function AppContent() {
     )
   }
 
-  if (!session) {
-    return <AuthScreen onOpenLegal={(legalView) => navigate(legalView)} />
-  }
+  // Экран входа — это view, а не блокирующий оверлей: legal-страницы
+  // («Политика», «Условия» из формы входа) остаются обычными экранами,
+  // остальной контент подменяется формой. Вход показываем в двух случаях:
+  // есть намерение (клик по требующему входа действию) или стек стоит на
+  // защищённом экране без сессии (например, сессия истекла на профиле) —
+  // до того момента, как эффект выше вернёт анонима в ленту.
+  const viewRequiresAuth = AUTH_VIEW_HINTS[current.view] !== undefined
+  const authActive =
+    !session &&
+    (authIntent !== null || viewRequiresAuth) &&
+    current.view !== 'privacy' &&
+    current.view !== 'terms'
 
   const SuspenseFallback = (
     <AppShell>
@@ -231,7 +315,17 @@ function AppContent() {
         </PageTransition>
       )}
 
-      {current.view === 'new' && (
+      {authActive && (
+        <PageTransition key={`auth:${current.key}`}>
+          <AuthScreen
+            hint={authIntent?.hint}
+            onBack={() => setAuthIntent(null)}
+            onOpenLegal={(legalView) => navigate(legalView)}
+          />
+        </PageTransition>
+      )}
+
+      {!authActive && current.view === 'new' && (
         <PageTransition key={current.key}>
           <Suspense fallback={SuspenseFallback}>
             <AppShell>
@@ -247,7 +341,7 @@ function AppContent() {
         </PageTransition>
       )}
 
-      {current.view === 'mine' && (
+      {!authActive && current.view === 'mine' && (
         <PageTransition key={current.key}>
           <Suspense fallback={SuspenseFallback}>
             <AppShell>
@@ -263,7 +357,7 @@ function AppContent() {
         </PageTransition>
       )}
 
-      {current.view === 'detail' && current.params.listingId && (
+      {!authActive && current.view === 'detail' && current.params.listingId && (
         <PageTransition key={current.key}>
           <Suspense fallback={SuspenseFallback}>
             <AppShell>
@@ -277,13 +371,15 @@ function AppContent() {
                 id={current.params.listingId}
                 onBack={goBack}
                 onStartChat={openChat}
+                requireAuth={requestAuth}
+                resumeStartChat={resumeChat}
               />
             </AppShell>
           </Suspense>
         </PageTransition>
       )}
 
-      {current.view === 'chats' && (
+      {!authActive && current.view === 'chats' && (
         <PageTransition key={current.key}>
           <Suspense fallback={SuspenseFallback}>
             <AppShell>
@@ -304,8 +400,7 @@ function AppContent() {
           </Suspense>
         </PageTransition>
       )}
-
-      {current.view === 'thread' && current.params.chatId && (
+      {!authActive && current.view === 'thread' && current.params.chatId && (
         <PageTransition key={current.key}>
           <Suspense fallback={SuspenseFallback}>
             <AppShell>
@@ -321,7 +416,7 @@ function AppContent() {
         </PageTransition>
       )}
 
-      {current.view === 'profile' && (
+      {!authActive && current.view === 'profile' && (
         <PageTransition key={current.key}>
           <Suspense fallback={SuspenseFallback}>
             <AppShell>
@@ -337,7 +432,7 @@ function AppContent() {
         </PageTransition>
       )}
 
-      {current.view === 'home' && (
+      {!authActive && current.view === 'home' && (
         <PageTransition key={current.key}>
           <AppShell>
             <MenuNav
@@ -349,6 +444,7 @@ function AppContent() {
             <HomeFeed
               onOpen={openDetail}
               onCreate={() => navigate('new')}
+              isAuthenticated={Boolean(user)}
               userEmailConfirmed={Boolean(user?.email_confirmed_at)}
               isSupabaseConfigured={isSupabaseConfigured()}
               showNotifications={showNotifications}

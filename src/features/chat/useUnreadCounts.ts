@@ -49,6 +49,8 @@ export function useUnreadCounts() {
   }, [])
 
   useEffect(() => {
+    // Для гостя подписку не заводим и в Supabase не ходим: считать нечего,
+    // а канал без сессии давал бы ошибки RLS и шум в консоли.
     if (!user) {
       setState(EMPTY)
       return

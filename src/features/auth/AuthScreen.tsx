@@ -17,9 +17,14 @@ const resetSchema = z.object({
 
 interface AuthScreenProps {
   onOpenLegal: (view: 'privacy' | 'terms') => void
+  // Отложенная авторизация: экран входа — это view, поэтому показываем
+  // кнопку возврата туда, откуда пришёл аноним, и подсказку — зачем вход.
+  // Без onBack экран остаётся полноэкранным гейтом (прежний режим).
+  onBack?: () => void
+  hint?: string
 }
 
-export function AuthScreen({ onOpenLegal }: AuthScreenProps) {
+export function AuthScreen({ onOpenLegal, onBack, hint }: AuthScreenProps) {
   const { signUp, signIn, resetPassword, user } = useAuth()
   const [mode, setMode] = useState<Mode>('signIn')
   const [email, setEmail] = useState('')
@@ -135,12 +140,28 @@ export function AuthScreen({ onOpenLegal }: AuthScreenProps) {
         transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         className="surface-elevated w-full max-w-md rounded-2xl bg-surface p-8 shadow-[var(--shadow-raised)]"
       >
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="-ml-2 mb-4 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-muted-foreground transition hover:text-foreground"
+          >
+            ← Назад
+          </button>
+        )}
+
         <h1 className="font-display text-2xl tracking-tight text-foreground">
           {isReset ? 'Сброс пароля' : isSignUp ? 'Регистрация' : 'Вход'}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Аренда жилья СКВОТ, без посредников.
         </p>
+
+        {hint && (
+          <p className="mt-4 rounded-xl bg-primary/10 px-4 py-3 text-sm text-primary">
+            {hint}
+          </p>
+        )}
 
         {isUnconfirmed && (
           <div className="mt-4 space-y-3 rounded-xl bg-amber/10 px-4 py-3 text-sm text-amber-foreground">

@@ -30,7 +30,10 @@ vi.mock('@/lib/supabase', () => ({
   getSupabaseClient: () => ({ auth: mock.auth, from: mock.from }),
 }))
 
-function renderWithAuth(overrides: Partial<AuthContextValue> = {}) {
+function renderWithAuth(
+  overrides: Partial<AuthContextValue> = {},
+  screenProps: { onBack?: () => void; hint?: string } = {},
+) {
   const value: AuthContextValue = {
     session: null,
     user: null,
@@ -46,7 +49,7 @@ function renderWithAuth(overrides: Partial<AuthContextValue> = {}) {
 
   render(
     <AuthContext.Provider value={value}>
-      <AuthScreen onOpenLegal={() => {}} />
+      <AuthScreen onOpenLegal={() => {}} {...screenProps} />
     </AuthContext.Provider>,
   )
 
@@ -161,5 +164,28 @@ describe('AuthScreen', () => {
       name: 'Иван',
       city: '',
     })
+  })
+
+  it('shows the hint and «← Назад» when rendered as a deferred-auth view', () => {
+    const onBack = vi.fn()
+    renderWithAuth(
+      {},
+      { onBack, hint: 'Войдите, чтобы написать автору' },
+    )
+
+    expect(
+      screen.getByText('Войдите, чтобы написать автору'),
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '← Назад' }))
+    expect(onBack).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the old full-screen gate (no back button) when onBack is not passed', () => {
+    renderWithAuth()
+
+    expect(
+      screen.queryByRole('button', { name: /назад/i }),
+    ).not.toBeInTheDocument()
   })
 })

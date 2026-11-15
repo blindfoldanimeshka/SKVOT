@@ -4,6 +4,7 @@ import { useUnreadCounts } from '@/features/chat/useUnreadCounts'
 import { AuthContext, type AuthContextValue } from '@/features/auth/AuthProvider'
 
 const channelHandlers: Record<string, (payload: unknown) => void> = {}
+let channelCalls = 0
 
 const channelMock = {
   on: (_event: string, _filter: unknown, handler: (payload: unknown) => void) => {
@@ -15,7 +16,10 @@ const channelMock = {
 
 vi.mock('@/lib/supabase', () => ({
   getSupabaseClient: () => ({
-    channel: () => channelMock,
+    channel: () => {
+      channelCalls += 1
+      return channelMock
+    },
     removeChannel: vi.fn(),
   }),
 }))
@@ -95,5 +99,17 @@ describe('useUnreadCounts', () => {
 
     expect(result.current.total).toBe(0)
     expect(result.current.byChat['c1']).toBeUndefined()
+  })
+
+  it('does not subscribe to realtime for anonymous users', () => {
+    channelCalls = 0
+
+    const { result } = renderHook(() => useUnreadCounts(), {
+      wrapper: wrapper({ user: null, session: null }),
+    })
+
+    // Гость: канал не создаём вовсе — ни подписки, ни ошибок RLS в консоли.
+    expect(channelCalls).toBe(0)
+    expect(result.current.total).toBe(0)
   })
 })

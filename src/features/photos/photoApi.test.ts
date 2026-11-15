@@ -46,8 +46,28 @@ function mockSupabaseWithStorage(dbResult: DbResult) {
   }))
 }
 
-function png(): File {
-  return new File(['x'], 'a.png', { type: 'image/png' })
+/** Canonical UUID v4 as produced by crypto.randomUUID(). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Splits an object-storage path into its segments, so assertions can talk about
+ * the directory, the file name and the extension separately instead of matching
+ * loose substrings (a hex uuid can accidentally contain anything).
+ */
+function splitPath(path: string): { dirs: string[]; fileName: string; base: string; ext: string } {
+  const segments = path.split('/')
+  const fileName = segments[segments.length - 1]
+  const dot = fileName.lastIndexOf('.')
+  return {
+    dirs: segments.slice(0, -1),
+    fileName,
+    base: dot > 0 ? fileName.slice(0, dot) : fileName,
+    ext: dot > 0 ? fileName.slice(dot + 1) : '',
+  }
+}
+
+function png(name = 'a.png'): File {
+  return new File(['x'], name, { type: 'image/png' })
 }
 
 describe('photoApi', () => {
@@ -67,16 +87,23 @@ describe('photoApi', () => {
     mockSupabaseWithStorage({ data: insertRow, error: null })
 
     const { uploadPhoto } = await import('./photoApi')
-    const file = png()
+    // Название заведомо не может встретиться внутри hex-UUID, поэтому проверка
+    // «имя файла пользователя не попало в путь» становится детерминированной.
+    const file = png('original-name.png')
     const res = await uploadPhoto('abc', file)
 
     expect(res.error).toBeNull()
     expect(res.data).toEqual({ id: 'img-1', path: 'listing/abc/uuid.png' })
 
     const uploadPath = uploadMock.mock.calls[0][0] as string
-    expect(uploadPath.startsWith('listing/abc/')).toBe(true)
-    expect(uploadPath.endsWith('.png')).toBe(true)
-    expect(uploadPath).not.toContain('a.png')
+    // Ожидаемая форма пути: listing/{listingId}/{uuid}.{ext}
+    const { dirs, fileName, base, ext } = splitPath(uploadPath)
+    expect(dirs).toEqual(['listing', 'abc'])
+    expect(base).toMatch(UUID_RE)
+    expect(ext).toBe('png')
+    // Имя файла сгенерировано (uuid), а не взято из файла пользователя.
+    expect(fileName).not.toBe(file.name)
+    expect(uploadPath).not.toContain(file.name)
 
     expect(dbChain.insert).toHaveBeenCalledWith(
       expect.objectContaining({ listing_id: 'abc', path: uploadPath }),

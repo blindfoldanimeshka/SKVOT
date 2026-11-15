@@ -4,6 +4,8 @@ coverage/
 .env
 .env.*
 !.env.example
+# Test env committed on purpose: dummy VITE_SUPABASE_* so `npm test` is hermetic.
+!.env.test
 *.log
 .DS_Store
 beta-codes.md
@@ -15,3 +17,10 @@ graphify-out/
 
 # ui-ux-pro-max skill clone (not part of app)
 .skill-tmp/
+
+# Playwright artifacts
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+e2e/.auth/

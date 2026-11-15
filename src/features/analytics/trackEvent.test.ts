@@ -1,11 +1,24 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-function makeSupabaseClient() {
-  const invoke = vi.fn().mockResolvedValue({ error: null, data: { ok: true } })
+interface MockClient {
+  auth: { getSession: ReturnType<typeof vi.fn> }
+  functions: { invoke: ReturnType<typeof vi.fn> }
+}
+
+const SESSION = { access_token: 'test-jwt', user: { id: 'u1' } }
+
+function makeClient(session: unknown = SESSION): MockClient {
   return {
-    functions: { invoke },
-    _invoke: invoke,
+    auth: { getSession: vi.fn().mockResolvedValue({ data: { session } }) },
+    functions: { invoke: vi.fn().mockResolvedValue({ error: null, data: { ok: true } }) },
   }
+}
+
+/** Подменяем '@/lib/supabase' и загружаем модуль заново, чтобы он увидел мок. */
+async function importTrackEvent(client: MockClient) {
+  vi.doMock('@/lib/supabase', () => ({ getSupabaseClient: () => client }))
+  const { trackEvent } = await import('./trackEvent')
+  return trackEvent
 }
 
 describe('trackEvent (F12 funnel)', () => {
@@ -13,44 +26,62 @@ describe('trackEvent (F12 funnel)', () => {
     vi.resetModules()
   })
 
-  it('invokes the track-event edge function with event_type and payload', async () => {
-    const client = makeSupabaseClient()
-    vi.doMock('@/lib/supabase', () => ({
-      getSupabaseClient: () => client,
-    }))
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
 
-    const { trackEvent } = await import('./trackEvent')
-    await trackEvent('open_chat', { listing_id: 'l1' })
+  it('sends event_type and payload when a session exists', async () => {
+    const client = makeClient()
+    const trackEvent = await importTrackEvent(client)
 
-    expect(client._invoke).toHaveBeenCalledWith('track-event', {
-      body: { event_type: 'open_chat', payload: { listing_id: 'l1' } },
+    await trackEvent('view_listing', { listing_id: 'l1' })
+
+    expect(client.auth.getSession).toHaveBeenCalledTimes(1)
+    expect(client.functions.invoke).toHaveBeenCalledWith('track-event', {
+      body: { event_type: 'view_listing', payload: { listing_id: 'l1' } },
     })
   })
 
-  it('omits payload when not provided', async () => {
-    const client = makeSupabaseClient()
-    vi.doMock('@/lib/supabase', () => ({
-      getSupabaseClient: () => client,
-    }))
+  it('sends null payload when none is provided', async () => {
+    const client = makeClient()
+    const trackEvent = await importTrackEvent(client)
 
-    const { trackEvent } = await import('./trackEvent')
-    await trackEvent('view_listing')
+    await trackEvent('open_chat')
 
-    const body = (client._invoke as ReturnType<typeof vi.fn>).mock.calls[0][1].body
-    expect(body).toEqual({ event_type: 'view_listing', payload: null })
+    expect(client.functions.invoke.mock.calls[0][1]).toEqual({
+      body: { event_type: 'open_chat', payload: null },
+    })
   })
 
-  it('swallows errors without throwing (analytics never breaks UX)', async () => {
-    const client = {
-      functions: {
-        invoke: vi.fn().mockRejectedValue(new Error('network down')),
-      },
-    }
-    vi.doMock('@/lib/supabase', () => ({
-      getSupabaseClient: () => client,
-    }))
+  it('skips guest clicks (no session) without invoking or warning', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const client = makeClient(null)
+    const trackEvent = await importTrackEvent(client)
 
-    const { trackEvent } = await import('./trackEvent')
+    await trackEvent('view_listing', { listing_id: 'l1' })
+
+    expect(client.functions.invoke).not.toHaveBeenCalled()
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('swallows invoke errors without throwing (analytics never breaks UX)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const client = makeClient()
+    client.functions.invoke.mockRejectedValue(new Error('cors blocked'))
+    const trackEvent = await importTrackEvent(client)
+
     await expect(trackEvent('send_message')).resolves.toBeUndefined()
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it('swallows session lookup failures too', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const client = makeClient()
+    client.auth.getSession.mockRejectedValue(new Error('offline'))
+    const trackEvent = await importTrackEvent(client)
+
+    await expect(trackEvent('create_listing')).resolves.toBeUndefined()
+    expect(client.functions.invoke).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledTimes(1)
   })
 })

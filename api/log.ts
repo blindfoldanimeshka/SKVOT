@@ -1,4 +1,10 @@
-// Vercel Function (Node.js runtime) — приёмник клиентских ошибок.
+// Vercel Function (Edge runtime) — приёмник клиентских ошибок.
+//
+// Почему Edge, а не Node: на nodejs26.x тело POST до функции не доходило
+// (`request.text()` возвращал пустую строку, `req.body` бросал `Invalid JSON`),
+// поэтому endpoint отвечал 400 на любой запрос. В Edge тело доступно нативно.
+//  - https://vercel.com/docs/functions/functions-api-reference#fetch-web-standard
+//  - https://vercel.com/docs/functions/runtimes/edge
 //
 // Контракт — Web Standard `fetch`-экспорт, а не legacy `(req, res)`:
 //  - https://vercel.com/docs/functions/functions-api-reference#fetch-web-standard
@@ -112,6 +118,18 @@ function empty(status: number, headers: Record<string, string>): Response {
   return new Response(null, { status, headers })
 }
 
+/**
+ * Edge-рантайм: в Node-рантайме (nodejs26.x) тело POST до функции не доходило —
+ * `request.text()` возвращал пустую строку, `req.body` бросал `Invalid JSON`.
+ * В Edge тело запроса доступно нативно, а Buffer/process недоступны, поэтому
+ * длину считаем через TextEncoder.
+ */
+export const config = { runtime: 'edge' }
+
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).length
+}
+
 export default {
   async fetch(request: Request): Promise<Response> {
     const method = request.method.toUpperCase()
@@ -146,22 +164,12 @@ export default {
       // Тело читаем один раз и целиком: `request.text()` — единственный способ,
       // который не зависит от рантаймовых парсеров @vercel/node.
       const raw = await request.text()
-      if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) {
+      if (byteLength(raw) > MAX_BODY_BYTES) {
         return empty(413, headers)
       }
 
       const parsed = parseLogPayload(raw)
       if (!parsed.ok) {
-        // Диагностика на время выяснения, почему тело пустое на этом рантайме.
-        console.error(
-          '[client-error] reject',
-          JSON.stringify({
-            status: parsed.status,
-            len: raw.length,
-            contentType: request.headers.get('content-type'),
-            contentLength: request.headers.get('content-length'),
-          }),
-        )
         return empty(parsed.status, headers)
       }
 

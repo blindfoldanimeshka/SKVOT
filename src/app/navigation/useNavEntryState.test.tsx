@@ -46,4 +46,16 @@ describe('useNavEntryState', () => {
     act(() => getByTestId('back').click())
     expect(getByTestId('city').textContent).toBe('Москва')
   })
+
+  it('keeps the initial value referentially stable across re-renders', () => {
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <NavigationProvider>{children}</NavigationProvider>
+    )
+    const { result, rerender } = renderHook(() => useNavEntryState('k', {}), {
+      wrapper,
+    })
+    const first = result.current[0]
+    rerender()
+    expect(result.current[0]).toBe(first)
+  })
 })

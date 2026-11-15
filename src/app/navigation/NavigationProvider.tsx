@@ -66,19 +66,34 @@ export function NavigationProvider({
     [],
   )
 
+  // Stable action identities: they only go through `dispatch` (already stable),
+  // so they are not recreated whenever state changes. Otherwise consumers that
+  // put e.g. `reset` in a useEffect dependency array would loop re-renders.
+  const push = useCallback(
+    (view: View, params?: NavParams) => dispatch({ type: 'push', view, params }),
+    [dispatch],
+  )
+  const replace = useCallback(
+    (view: View, params?: NavParams) => dispatch({ type: 'replace', view, params }),
+    [dispatch],
+  )
+  const back = useCallback(() => dispatch({ type: 'back' }), [dispatch])
+  const forward = useCallback(() => dispatch({ type: 'forward' }), [dispatch])
+  const reset = useCallback((view?: View) => dispatch({ type: 'reset', view }), [dispatch])
+
   const value = useMemo<NavContextValue>(
     () => ({
       current: state.entries[state.index],
       canGoBack: state.index > 0,
       canGoForward: state.index < state.entries.length - 1,
-      push: (view, params) => dispatch({ type: 'push', view, params }),
-      replace: (view, params) => dispatch({ type: 'replace', view, params }),
-      back: () => dispatch({ type: 'back' }),
-      forward: () => dispatch({ type: 'forward' }),
-      reset: (view) => dispatch({ type: 'reset', view }),
+      push,
+      replace,
+      back,
+      forward,
+      reset,
       updateEntry,
     }),
-    [state, dispatch, updateEntry],
+    [state, push, replace, back, forward, reset, updateEntry],
   )
 
   return <NavContext.Provider value={value}>{children}</NavContext.Provider>

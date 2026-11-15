@@ -47,4 +47,36 @@ describe('NavigationProvider', () => {
     const { result } = renderHook(() => useNav(), { wrapper })
     expect(result.current.current.scrollY).toBe(123)
   })
+
+  it('keeps navigate actions referentially stable across state changes', () => {
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <NavigationProvider>{children}</NavigationProvider>
+    )
+    const { result } = renderHook(() => useNav(), { wrapper })
+    const pushBefore = result.current.push
+    const resetBefore = result.current.reset
+    act(() => pushBefore('mine'))
+    expect(result.current.current.view).toBe('mine')
+    expect(result.current.push).toBe(pushBefore)
+    expect(result.current.reset).toBe(resetBefore)
+  })
+
+  it('reset clears preserved entry state and rotates the entry key', () => {
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <NavigationProvider>{children}</NavigationProvider>
+    )
+    const { result } = renderHook(() => useNav(), { wrapper })
+    const keyBefore = result.current.current.key
+    act(() =>
+      result.current.updateEntry(result.current.current.key, {
+        state: { feedFilters: { city: 'Москва' } },
+      }),
+    )
+    expect(result.current.current.state).toEqual({
+      feedFilters: { city: 'Москва' },
+    })
+    act(() => result.current.reset())
+    expect(result.current.current.key).not.toBe(keyBefore)
+    expect(result.current.current.state).toEqual({})
+  })
 })

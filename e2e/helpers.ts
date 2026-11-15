@@ -1,10 +1,16 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 /**
  * Общие помощники e2e.
  *
  * Приложение в рантайме ходит в реальный Supabase. Спек-файлы только читают
  * и навигируют: никакой отправки форм, никаких операций записи.
+ *
+ * Отложенная авторизация: аноним видит ленту, фильтры и карточку объявления,
+ * вход нужен только на действиях («Подать объявление», «Мои», чаты, профиль,
+ * «Написать автору», «Пожаловаться»). Поэтому контентные спеки выполняются
+ * анонимно (ANONYMOUS_STATE) и проверяют реальную выдачу, а экран входа
+ * проверяется через эти самые действия-гейты — см. e2e/auth-guard.spec.ts.
  */
 
 export interface ConsoleWatch {
@@ -32,6 +38,11 @@ export function watchErrors(page: Page): ConsoleWatch {
 /**
  * Сетевой шум dev-окружения: несуществующий favicon, битые фото из реальных
  * данных и т.п. Не признаки падения рендера, но выводятся в аннотациях теста.
+ *
+ * Больше здесь никакой категории «известные дефекты приложения» нет: карточка
+ * перестала быть `<button>` внутри `<button>` (ListingCard — `<article>` +
+ * кнопка-оверлей), а `trackEvent` не дёргает edge-функцию без сессии. Так что
+ * guard строгий: любая console.error, не являющаяся сетевым шумом, роняет тест.
  */
 const RESOURCE_NOISE = /Failed to load resource|net::ERR_/i
 
@@ -70,16 +81,27 @@ export function assertNoRenderErrors(watch: ConsoleWatch): void {
 export const SCREEN_TIMEOUT = 20_000
 
 /**
- * Открывает / и ждёт, пока приложение отрендерит один из верхнеуровневых
- * экранов: ленту («Объявления», есть сессия) или вход («Вход», сессии нет).
- * Возвращает, какой экран показали.
+ * Пустое состояние хранилища: контекст гарантированно анонимный, даже если
+ * прогон запускают с сохранённой сессией. Отложенная авторизация позволила
+ * проверять ленту и карточку без тестового пользователя.
  */
-export async function openApp(page: Page): Promise<'feed' | 'auth'> {
+export const ANONYMOUS_STATE = { cookies: [], origins: [] }
+
+/**
+ * Открывает / и ждёт, пока приложение отрендерит любой верхнеуровневый экран:
+ * ленту («Объявления») или вход («Вход» — куда уводят действия-гейты). Это
+ * проверка «каркас жив, белого экрана и цикла ре-рендеров нет».
+ *
+ * Который именно экран — решает тест web-first ассертом (`feedHeading()` /
+ * `authScreen()`), а не снимком DOM: сразу после первой отрисовки App.tsx
+ * делает reset() пока без сессии, и на одну-две кадры заголовок может быть
+ * снят (AnimatePresence mode="wait"), поэтому мгновенный isVisible()
+ * враньё, а ожидание — нет.
+ */
+export async function openApp(page: Page): Promise<void> {
   await page.goto('/', { waitUntil: 'domcontentloaded' })
 
-  const screen = page
-    .getByRole('heading', { level: 1, name: 'Объявления' })
-    .or(page.getByRole('heading', { level: 1, name: 'Вход', exact: true }))
+  const screen = feedHeading(page).or(authScreen(page))
 
   await expect(
     screen,
@@ -88,18 +110,55 @@ export async function openApp(page: Page): Promise<'feed' | 'auth'> {
       'pageerror/console.error выше, что dev-сервер и Supabase доступны, и что ' +
       'прогрев e2e/global-setup.ts прошёл (в логе прогона строка «dev-сервер прогрет»).',
   ).toBeVisible({ timeout: SCREEN_TIMEOUT })
-
-  return (await page.getByRole('heading', { level: 1, name: 'Объявления' }).isVisible())
-    ? 'feed'
-    : 'auth'
 }
 
-/** Карточка объявления: кнопка, внутри которой заголовок города (h3). Без CSS-классов. */
+/** Заголовок ленты — экран анонима по умолчанию (отложенная авторизация). */
+export function feedHeading(page: Page) {
+  return page.getByRole('heading', { level: 1, name: 'Объявления' })
+}
+
+/** Экран входа, открытый действием-гейтом: заголовок и подсказка «зачем вход». */
+export function authScreen(page: Page) {
+  return page.getByRole('heading', { level: 1, name: 'Вход', exact: true })
+}
+
+/**
+ * Карточка объявления.
+ *
+ * Разметка сменилась, когда в e2e всплыла вложенность кнопок: карточка — это
+ * <article>, а не <button> (внутри живёт карусель со своими кнопками, а
+ * `<button>` внутри `<button>` React считает ошибкой). Текст — город (`h3`) и
+ * цена — лежит ВНЕ кнопки, поэтому прежний поиск «кнопка, содержащая h3» больше
+ * не находит ничего. Ищем статью по единственному интерактиву — кнопке-оверлею,
+ * растянутой по всей карточке (`absolute inset-0`), с доступным именем
+ * «Открыть объявление: <город>».
+ */
 export function listingCards(page: Page) {
-  return page.getByRole('button').filter({ has: page.getByRole('heading', { level: 3 }) })
+  return page.getByRole('article').filter({
+    has: page.getByRole('button', { name: /^Открыть объявление:/ }),
+  })
 }
 
-export const SKIP_NO_SESSION =
-  'Лента доступна только авторизованным: в App.tsx при !session рендерится AuthScreen. ' +
-  'Нужна сессия подтверждённого тестового пользователя: подготовьте Playwright storageState ' +
-  'и запустите с E2E_STORAGE_STATE=<путь> (см. e2e/README.md).'
+/**
+ * Кнопка-оверлей карточки: клик по любому месту карточки (кроме контролов
+ * карусели) приходит именно на неё. Отдельный экспорт, чтобы тесты могли
+ * проверить доступное имя, а не только факт клика.
+ */
+export function openListingButton(card: Locator): Locator {
+  return card.getByRole('button', { name: /^Открыть объявление:/ })
+}
+
+/**
+ * <select> фильтра ленты. Подпись живёт в <span> внутри <label>, поэтому
+ * доступное имя поля — не «Тип», а «Тип Все Сдают Ищут» (в него попадает текст
+ * опций). Точное совпадение с name не работает, берём начало имени.
+ */
+export function feedFilter(page: Page, label: string) {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return page.getByRole('combobox', { name: new RegExp(`^${escaped}(\\s|$)`) })
+}
+
+/** Кнопка возврата с экрана входа-по-требованию обратно к тому, откуда пришёл гость. */
+export function authBackButton(page: Page) {
+  return page.getByRole('button', { name: '← Назад' })
+}

@@ -12,9 +12,10 @@ import { defineConfig, devices } from '@playwright/test'
  * одним HTTP-запросом до старта воркеров. Ослаблением проверок это не является:
  * ассерты в спеках остались те же, изменилось только время ожидания.
  *
- * Опционально: E2E_STORAGE_STATE=<путь к auth-state.json> подключает сессию
- * тестового пользователя (её подготовит оркестратор) — тогда лента и детали
- * объявлений проверяются полностью, иначе эти тесты skip'ятся с объяснением.
+ * Сессия не нужна: отложенная авторизация показывает ленту, фильтры и карточку
+ * объявления анониму, поэтому все спеки работают без тестового пользователя и
+ * сами фиксируют анонимный контекст (`test.use({ storageState: ... })` в
+ * e2e/helpers.ts, ANONYMOUS_STATE). Хранить состояние в конфиге больше незачем.
  */
 
 const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:5173'
@@ -36,10 +37,6 @@ export default defineConfig({
     baseURL,
     trace: 'on-first-retry',
     video: 'off',
-    // storageState подхватывается только если явно задан (см. e2e/README.md).
-    ...(process.env.E2E_STORAGE_STATE
-      ? { storageState: process.env.E2E_STORAGE_STATE }
-      : {}),
   },
   projects: [
     {

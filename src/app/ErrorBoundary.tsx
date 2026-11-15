@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { reportClientError } from '@/lib/reportClientError'
 
 interface Props {
   children: ReactNode
@@ -17,6 +18,8 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('App crashed:', error, info.componentStack)
+    // Отправка помечает ошибку — глобальный window-обработчик не задублирует
+    reportClientError(error, { componentStack: info.componentStack })
   }
 
   render() {

@@ -14,6 +14,7 @@ import { createRoot } from 'react-dom/client'
 import { MotionConfig } from 'motion/react'
 import { App } from '@/app/App'
 import { ErrorBoundary } from '@/app/ErrorBoundary'
+import { installClientErrorReporting } from '@/lib/reportClientError'
 import '@/styles/index.css'
 
 const root = document.getElementById('root')
@@ -21,6 +22,9 @@ const root = document.getElementById('root')
 if (!root) {
   throw new Error('Не найден контейнер #root.')
 }
+
+// До монтирования React, чтобы поймать и ошибки самого первого рендера
+installClientErrorReporting()
 
 createRoot(root).render(
   <StrictMode>

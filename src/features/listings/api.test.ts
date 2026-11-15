@@ -47,7 +47,7 @@ describe('listings api', () => {
     vi.resetModules()
   })
 
-  it('createListing inserts author_id and status:active and returns data', async () => {
+  it('createListing inserts author_id and status:pending (премодерация) and returns data', async () => {
     const result = { data: { id: 'l1' }, error: null }
     const chain = makeChain(result)
     mockSupabase(chain)
@@ -56,10 +56,24 @@ describe('listings api', () => {
     const res = await createListing(validValues, 'u1')
 
     expect(chain.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ author_id: 'u1', status: 'active' }),
+      expect.objectContaining({ author_id: 'u1', status: 'pending' }),
     )
     expect(res.error).toBeNull()
     expect(res.data).toEqual({ id: 'l1' })
+  })
+
+  it('createListing never sends status:active — публикация только после модерации', async () => {
+    const result = { data: { id: 'l1' }, error: null }
+    const chain = makeChain(result)
+    mockSupabase(chain)
+
+    const { createListing } = await import('./api')
+    await createListing(validValues, 'u1')
+
+    const payload = (chain.insert as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+      status: string
+    }
+    expect(payload.status).toBe('pending')
   })
 
   it('createListing returns the error object on failure without throwing', async () => {

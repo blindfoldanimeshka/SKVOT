@@ -7,6 +7,22 @@ import { ListingForm } from './ListingForm'
 
 type ListingRow = Database['public']['Tables']['listings']['Row']
 
+const BADGE_BASE =
+  'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold'
+
+/** Бейдж статуса для автора: премодерация видна человеку, а не только в БД. */
+const STATUS_BADGE: Record<ListingRow['status'], { label: string; className: string }> = {
+  pending: { label: 'На модерации', className: `${BADGE_BASE} bg-amber-50 text-amber-950` },
+  active: { label: 'Опубликовано', className: `${BADGE_BASE} bg-emerald-50 text-emerald-950` },
+  rejected: { label: 'Отклонено', className: `${BADGE_BASE} bg-red-50 text-red-950` },
+  archived: { label: 'В архиве', className: `${BADGE_BASE} bg-muted/80 text-stone-700` },
+}
+
+function statusBadge(listing: ListingRow) {
+  if (listing.deleted_at) return STATUS_BADGE.archived
+  return STATUS_BADGE[listing.status] ?? STATUS_BADGE.pending
+}
+
 interface MyListingsProps {
   onBack: () => void
 }
@@ -133,6 +149,7 @@ export function MyListings({ onBack }: MyListingsProps) {
         <ul className="space-y-3">
           {listings.map((listing) => {
             const isArchived = Boolean(listing.deleted_at)
+            const badge = statusBadge(listing)
             return (
               <li
                 key={listing.id}
@@ -143,11 +160,7 @@ export function MyListings({ onBack }: MyListingsProps) {
                     <span className="font-semibold text-foreground">
                       {listing.city}
                     </span>
-                    {isArchived && (
-                      <span className="inline-flex items-center rounded-full bg-muted/80 px-2 py-0.5 text-xs font-semibold text-stone-700">
-                        В архиве
-                      </span>
-                    )}
+                    <span className={badge.className}>{badge.label}</span>
                   </div>
                   <p className="text-sm text-muted-foreground">
                     {listing.type === 'offer' ? 'Сдаётся' : 'Ищу'}, {listing.price} ₽

@@ -36,7 +36,9 @@ export async function createListing(
       address: values.address ?? '',
       lat: values.lat ?? null,
       lng: values.lng ?? null,
-      status: 'active',
+      // Премодерация: объявление создаётся на проверке и попадает в ленту
+      // только после одобрения модератором (RLS разрешает вставить 'pending').
+      status: 'pending',
     })
     .select()
     .single()

@@ -122,7 +122,7 @@ export function ListingForm({ initial, onSaved, onCancel }: ListingFormProps) {
     }
 
     if (!user.email_confirmed_at) {
-      setFormError('Подтвердите email, чтобы опубликовать объявление.')
+      setFormError('Подтвердите email, чтобы отправить объявление на модерацию.')
       return
     }
 
@@ -362,12 +362,22 @@ export function ListingForm({ initial, onSaved, onCancel }: ListingFormProps) {
               ? 'Сохраняем…'
               : isEditing
                 ? 'Сохранить'
-                : 'Опубликовать'}
+                : 'Отправить на модерацию'}
           </button>
         </form>
 
         {uploaderListingId && (
           <div className="pt-5">
+            {!isEditing && (
+              <p
+                role="status"
+                className="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950"
+              >
+                Объявление создано и отправлено на модерацию. После одобрения
+                оно появится в общей ленте; статус проверки виден в «Мои
+                объявления».
+              </p>
+            )}
             <PhotoUploader listingId={uploaderListingId} />
             {!isEditing && (
               <button

@@ -167,3 +167,39 @@ describe('ListingDetail deferred auth', () => {
     expect(openOrCreateChat.mock.calls.length).toBe(1)
   })
 })
+
+describe('ListingDetail hero — фото ограничено, плашка под фото', () => {
+  beforeEach(() => {
+    getListing.mockReset()
+    // Mock-объявление: фото берутся из getMockPhotoUrls, карусель рендерится сразу.
+    getListing.mockResolvedValue({ data: { ...listing, is_mock: true }, error: null })
+    boostListing.mockReset()
+    openOrCreateChat.mockReset()
+  })
+
+  it('карусель ограничена по высоте, плашка — flow-футер под фото, а не absolute поверх снимка', async () => {
+    renderDetail()
+
+    const carousel = await screen.findByRole('group', { name: 'Фото объявления' })
+    expect(carousel).toHaveClass('max-h-[35vh]', 'sm:max-h-[35vh]')
+
+    // Плашка — последний flow-ребенок hero-карточки (сиблинг карусели), без absolute.
+    const hero = carousel.parentElement as HTMLElement
+    const plate = hero.lastElementChild as HTMLElement
+    expect(plate).not.toHaveClass('absolute')
+    expect(plate).toContainElement(screen.getByRole('heading', { level: 1, name: 'Москва' }))
+  })
+
+  it('бейдж мока читается «Демо» (кириллица), цена лежит на плашке под фото', async () => {
+    renderDetail()
+
+    const carousel = await screen.findByRole('group', { name: 'Фото объявления' })
+    const plate = carousel.parentElement!.lastElementChild as HTMLElement
+
+    expect(plate).toHaveTextContent('Демо')
+    expect(screen.queryByText('MOCK')).not.toBeInTheDocument()
+    // Цена читаема на плашке (тот же формат, что и в бенто-плитке ниже).
+    expect(plate).toHaveTextContent('50 000')
+    expect(plate).toHaveTextContent('Москва')
+  })
+})

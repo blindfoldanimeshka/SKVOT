@@ -62,7 +62,7 @@ export function ListingCard({ listing, onOpen, photoUrls }: ListingCardProps) {
 
           {listing.is_mock && (
             <span className="inline-flex w-fit items-center rounded-[8px] border border-primary/20 bg-primary/15 px-3 py-1 text-xs font-semibold text-primary backdrop-blur-sm">
-              MOCK
+              Демо
             </span>
           )}
         </div>

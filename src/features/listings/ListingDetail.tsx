@@ -135,7 +135,7 @@ export function ListingDetail({
   }
 
   return (
-    <section className="max-w-5xl space-y-6">
+    <section className="max-w-5xl space-y-4">
       <button
         type="button"
         onClick={onBack}
@@ -161,47 +161,56 @@ export function ListingDetail({
 
       {!loading && !error && listing && (
         <>
-          {/* Hero Frame */}
-          <div className="relative overflow-hidden rounded-3xl bg-card shadow-[var(--shadow-raised)]">
+          {/* Hero: фото ограничено по высоте (35vh на десктопе, 35vh на мобильном;
+              было 45/40vh — из-за этого «Адрес» уезжал под док на 1280×900),
+              плашка с бейджами/городом/ценой — ПОД фото, в обычном потоке. Раньше она
+              лежала absolutely поверх снимка на всю его глубину (~600px при aspect 16/9
+              на 1024px), из-за чего суть уезжала под сгиб. */}
+          <div className="overflow-hidden rounded-3xl bg-card shadow-[var(--shadow-raised)]">
             {photos.length > 0 ? (
               <>
                 <PhotoCarousel
                   urls={photos}
                   alt={`Фото: ${listing.city}`}
                   onImageClick={(i) => { setLightboxIndex(i); setLightboxOpen(true) }}
-                  className="aspect-[9/16] sm:aspect-[16/9]"
+                  className="aspect-[9/16] max-h-[35vh] sm:aspect-[16/9] sm:max-h-[35vh]"
                 />
 
-                {/* Dark overlay panel — overlapping bottom */}
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 p-3 sm:p-5">
-                  <div className="pointer-events-auto rounded-2xl bg-black/90 p-4 shadow-2xl sm:p-5" style={{ color: '#fff' }}>
-                    {/* Badges row */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-                          listing.type === 'offer'
-                            ? 'bg-lime-400/20 text-lime-300'
-                            : 'bg-purple-400/20 text-purple-300'
-                        }`}
-                      >
-                        {listing.type === 'offer' ? 'Сдаётся' : 'Ищу'}
+                {/* Плашка — footer карточки под фото: сплошной чёрный фон, белый текст —
+                    контраст city/price без полупрозрачных наслоений поверх снимка */}
+                <div className="bg-black px-4 py-4 sm:px-5 sm:py-3">
+                  {/* Badges row */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                        listing.type === 'offer'
+                          ? 'bg-lime-400/20 text-lime-300'
+                          : 'bg-purple-400/20 text-purple-300'
+                      }`}
+                    >
+                      {listing.type === 'offer' ? 'Сдаётся' : 'Ищу'}
+                    </span>
+                    {listing.is_mock && (
+                      <span className="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
+                        Демо
                       </span>
-                      {listing.is_mock && (
-                        <span className="inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-xs font-semibold" style={{ color: '#fff' }}>
-                          MOCK
-                        </span>
-                      )}
-                      {listing.promoted_until && new Date(listing.promoted_until) > new Date() && (
-                        <span className="inline-flex items-center rounded-full bg-amber-400/20 px-3 py-1 text-xs font-semibold text-amber-300">
-                          Продвигается
-                        </span>
-                      )}
-                    </div>
+                    )}
+                    {listing.promoted_until && new Date(listing.promoted_until) > new Date() && (
+                      <span className="inline-flex items-center rounded-full bg-amber-400/20 px-3 py-1 text-xs font-semibold text-amber-300">
+                        Продвигается
+                      </span>
+                    )}
+                  </div>
 
-                    {/* City */}
-                    <h1 className="mt-2 font-display text-2xl font-bold tracking-tight sm:mt-3 sm:text-3xl" style={{ color: '#fff' }}>
+                  {/* City + price: baseline-строка, бейжи выше — не наезжают на текст */}
+                  <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 sm:mt-3">
+                    <h1 className="font-display text-2xl font-bold tracking-tight text-white sm:text-3xl">
                       {listing.city}
                     </h1>
+                    <p className="font-display text-xl font-bold text-white sm:text-2xl">
+                      {formatPrice(listing.price)}{' '}
+                      <span className="text-sm font-medium text-white/70">₽/мес.</span>
+                    </p>
                   </div>
                 </div>
               </>
@@ -254,7 +263,7 @@ export function ListingDetail({
 
             {/* Address */}
             {listing.address && (
-              <div className="surface-elevated flex items-start gap-3 rounded-2xl bg-surface p-5">
+              <div className="surface-elevated flex items-start gap-3 self-start rounded-2xl bg-surface p-5">
                 <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10">
                   <MapPin className="h-4 w-4 text-primary" />
                 </div>

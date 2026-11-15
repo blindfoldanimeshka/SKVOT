@@ -214,10 +214,12 @@ describe('ListingCard доступность разметки', () => {
     expect(dotsStrip).toHaveClass('pointer-events-none')
   })
 
-  it('бейдж MOCK и тип «Ищут» по-прежнему на месте', () => {
+  it('бейдж «Демо» и тип «Ищут» по-прежнему на месте', () => {
     renderCard({ is_mock: true, type: 'request' })
 
-    expect(screen.getByText('MOCK')).toBeInTheDocument()
+    expect(screen.getByText('Демо')).toBeInTheDocument()
     expect(screen.getByText('Ищут')).toBeInTheDocument()
+    // Латиницы «MOCK» нигде быть не должно (выглядит как «МОСК» = Москва).
+    expect(screen.queryByText('MOCK')).not.toBeInTheDocument()
   })
 })

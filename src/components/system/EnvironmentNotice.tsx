@@ -4,6 +4,9 @@ interface EnvironmentNoticeProps {
 
 export function EnvironmentNotice({ configured }: EnvironmentNoticeProps) {
   if (configured) {
+    // Сообщение для разработчика: на боевом домене пользователю его видеть нельзя,
+    // иначе в подвале ленты висит «выполните миграции и RLS-тесты».
+    if (!import.meta.env.DEV) return null
     return (
       <p className="rounded-xl bg-emerald-50 p-4 text-sm text-emerald-950">
         Supabase подключён. Перед первым релизом выполните миграции и RLS-тесты.

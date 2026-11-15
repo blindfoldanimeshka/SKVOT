@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { defaultExclude, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath, URL } from 'node:url'
@@ -15,6 +15,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: true,
+    // e2e-спеки Playwright (e2e/**) запускает `npm run e2e`, не vitest
+    exclude: [...defaultExclude, 'e2e/**'],
   },
 })
 

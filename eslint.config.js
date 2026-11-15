@@ -14,5 +14,10 @@ export default tseslint.config(
     files: ['vite.config.ts'],
     languageOptions: { globals: globals.node },
   },
+  {
+    // Playwright: конфиг и e2e-спеки живут в node-окружении (браузер — через page-объекты)
+    files: ['playwright.config.ts', 'e2e/**/*.ts'],
+    languageOptions: { globals: globals.node },
+  },
 )
 

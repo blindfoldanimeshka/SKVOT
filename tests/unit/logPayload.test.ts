@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import handler from '../../api/log'
-import {
+import handler, {
   MAX_BODY_BYTES,
   MAX_COMPONENT_STACK,
   MAX_MESSAGE,
@@ -10,7 +9,7 @@ import {
   MAX_URL,
   parseLogPayload,
   type ClientErrorPayload,
-} from '../../api/_logPayload'
+} from '../../api/log'
 
 function okPayload(body: string): ClientErrorPayload {
   const result = parseLogPayload(body)

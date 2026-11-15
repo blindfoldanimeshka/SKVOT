@@ -91,9 +91,6 @@
   --color-gray-800: #e5e5e5;
   --color-gray-900: #f5f5f5;
   --color-gray-950: #ffffff;
-
-  /* === White override → dark surface for bg-white === */
-  --color-white: #0f0f0f;
 }
 
 html {
@@ -152,5 +149,66 @@ h1, h2, h3 {
   background:
     radial-gradient(120% 120% at 50% 0%, rgba(125, 57, 235, 0.06), transparent 60%),
     var(--color-surface);
+}
+
+/* === Dock «Рейка» ===
+   Высота дока — единый источник правды: MenuBar красит полосу по этим
+   переменным, AppShell отступает контент снизу calc(var(--dock-h) + 24px),
+   поэтому карточки/цена/адрес не уходят под док ни на 1280×900, ни на 390×844. */
+:root {
+  --dock-h: 84px;
+  --dock-h-compact: 56px;
+  /* Полоса почти непрозрачная (α .97): белый текст страницы не просвечивает
+     сквозь док; backdrop-blur остался как страховка на скролле. */
+  --dock-bg: rgb(8, 8, 11);
+  /* Риски линейки: мелкие каждые 24px, крупные (чуть светлее) каждые 120px.
+     Контраст поднят под плотный фон (.18→.22 / .32→.40), иначе риски тонут. */
+  --dock-tick: rgba(255, 255, 255, 0.22);
+  --dock-tick-strong: rgba(255, 255, 255, 0.4);
+  /* Подписи/иконки дока: muted-foreground (0.6) с моно-10px на плотном фоне
+     бледнеет — держим отдельными токенами. */
+  --dock-label-idle: rgba(255, 255, 255, 0.72);
+  --dock-icon-idle: rgba(255, 255, 255, 0.65);
+}
+
+@media (max-width: 420px) {
+  :root {
+    --dock-h: 72px;
+    --dock-h-compact: 48px;
+  }
+}
+
+/* Два слоя штрихов одним элементом: плашка 120px/24px с одной риской внутри,
+   повторяется по горизонтали (repeat-x), высота плашки = длина штриха. */
+.dock-rules {
+  height: 14px;
+  background-image:
+    repeating-linear-gradient(to right, var(--dock-tick-strong) 0 1px, transparent 1px 120px),
+    repeating-linear-gradient(to right, var(--dock-tick) 0 1px, transparent 1px 24px);
+  background-size: 120px 14px, 24px 10px;
+  background-repeat: repeat-x;
+  background-position: 0 0;
+}
+
+/* Фон полосы дока — токеном, чтобы он совпадал с «подъёмом» ниже. */
+.dock-bar {
+  background-color: var(--dock-bg);
+}
+
+/* «Подъём» над доком: 24px градиент цвет→прозрачный, чтобы контент не
+   обрывался резкой кромкой полосы. */
+.dock-lift {
+  height: 24px;
+  background-image: linear-gradient(to top, var(--dock-bg), transparent);
+}
+
+/* Подписи дока: системный моно-стек, 10px, uppercase, разреженный трекинг.
+   line-height: 1 — подпись не обрезается нижней кромкой полосы. */
+.dock-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
 }
 

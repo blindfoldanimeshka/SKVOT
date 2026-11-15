@@ -23,7 +23,10 @@ export function AppShell({ children }: AppShellProps) {
   const bottomOpacity = prefersReduced ? undefined : bottomFade
 
   return (
-    <main className="min-h-screen bg-stone-50 pb-28">
+    // pb = var(--dock-h) + 24px — док (z-40) перекрывает только резервную зону;
+    // мягкий край выше полосы делает .dock-lift внутри дока (он прижат
+    // к вьюпорту и не уезжает со скроллом).
+    <main className="min-h-screen bg-stone-50 pb-[calc(var(--dock-h)_+_24px)]">
       <header className="sticky top-0 z-40 bg-surface/80 shadow-[var(--shadow-surface)] backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3 sm:px-8">
           <a href="/" aria-label="СКВОТ">

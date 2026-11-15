@@ -23,7 +23,6 @@ export interface AuthContextValue {
     password: string
     name: string
     city: string
-    inviteCode?: string
   }) => Promise<AuthResult>
   signIn: (params: { email: string; password: string }) => Promise<AuthResult>
   signOut: () => Promise<AuthResult>
@@ -65,10 +64,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const signUp = useCallback<AuthContextValue['signUp']>(
-    async ({ email, password, name, city, inviteCode }) => {
+    async ({ email, password, name, city }) => {
       const supabase = getSupabaseClient()
 
-      const { data, error } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email,
         password,
         options: { data: { name, city } },
@@ -76,13 +75,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error) {
         return { error: error.message }
-      }
-
-      if (inviteCode && data.user) {
-        await supabase.rpc('claim_invite', {
-          p_code: inviteCode,
-          p_user_id: data.user.id,
-        })
       }
 
       return { error: null }

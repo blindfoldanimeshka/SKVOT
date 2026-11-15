@@ -21,7 +21,7 @@
 - **Собственный SMTP**: для production по ТЗ §4.1 нужен выделенный SMTP (встроенная отправка Supabase имеет тестовые лимиты). Для закрытой беты допустимо дефолтное. Решение за пользователем.
 - **Юридическая проверка 152-ФЗ**: тексты Privacy/Terms — шаблоны-заглушки, требуют реальной проверки перед публичным РФ-запуском (ТЗ §6).
 - **Кнопка удаления аккаунта (фаза 8 / 152-ФЗ §3.2)**: реализована — Edge Function `delete-account` (service_role, каскадное удаление `auth.users` → `public.users` → `listings`/`chats`/`messages`/`reports` настроено миграцией 001 через `ON DELETE CASCADE`). Требует деплоя функции (`supabase functions deploy delete-account`).
-- **Инвайт-коды (фаза 8 / 04-closed-beta.md)**: миграция `202607190005_beta_invites.sql` накатана; RLS запрещает прямое чтение `invites` (только `is_invite_valid()` / `claim_invite()` с service_role). На бете доступ по коду работает через `supabase.rpc('is_invite_valid')` из клиента (обход возможен, приемлемо для беты). Выдача 10 кодов — вручную через SQL-консоль.
+- **Инвайт-коды (фаза 8 / 04-closed-beta.md)**: инвайт-гейт снят по решению владельца, регистрация открыта всем. Миграция `202611150001_remove_beta_invites.sql` удаляет таблицу `invites` и RPC `is_invite_valid` / `invite_status` / `claim_invite`.
 
 ## Security hardening (post-review)
 

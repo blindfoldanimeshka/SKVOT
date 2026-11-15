@@ -3,11 +3,6 @@ import { motion } from 'motion/react'
 import { z } from 'zod'
 import { useAuth } from '@/features/auth/useAuth'
 import { authSchema } from '@/features/profile/profileSchema'
-import {
-  checkInviteStatus,
-  inviteErrorMessage,
-  isInviteCodeFormatValid,
-} from '@/features/auth/invite'
 
 type Mode = 'signIn' | 'signUp' | 'reset'
 
@@ -32,7 +27,6 @@ export function AuthScreen({ onOpenLegal }: AuthScreenProps) {
   const [name, setName] = useState('')
   const [city, setCity] = useState('')
   const [consent, setConsent] = useState(false)
-  const [inviteCode, setInviteCode] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
@@ -102,25 +96,11 @@ export function AuthScreen({ onOpenLegal }: AuthScreenProps) {
     if (isSignUp) {
       const data = parsed.data as z.infer<typeof authSchema>
 
-      if (!isInviteCodeFormatValid(inviteCode)) {
-        setIsSubmitting(false)
-        setFormError('Введите инвайт-код в формате BETA-XXXXXX')
-        return
-      }
-
-      const inviteStatus = await checkInviteStatus(inviteCode)
-      if (inviteStatus !== 'valid') {
-        setIsSubmitting(false)
-        setFormError(inviteErrorMessage(inviteStatus))
-        return
-      }
-
       result = await signUp({
         email: data.email,
         password: data.password,
         name: data.name,
         city: data.city ?? '',
-        inviteCode: inviteCode.trim().toUpperCase(),
       })
     } else {
       const data = parsed.data as z.infer<typeof signInOnlySchema>
@@ -141,7 +121,6 @@ export function AuthScreen({ onOpenLegal }: AuthScreenProps) {
       setPassword('')
       setName('')
       setCity('')
-      setInviteCode('')
       setConsent(false)
     }
   }
@@ -210,17 +189,6 @@ export function AuthScreen({ onOpenLegal }: AuthScreenProps) {
               error={errors.city}
               autoComplete="address-level2"
               optional
-            />
-          )}
-
-          {isSignUp && (
-            <Field
-              label="Инвайт-код"
-              type="text"
-              value={inviteCode}
-              onChange={setInviteCode}
-              error={errors.inviteCode}
-              autoComplete="off"
             />
           )}
           <Field

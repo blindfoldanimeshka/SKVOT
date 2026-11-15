@@ -1,5 +1,9 @@
 # Design: Deferred Phase 3 — legal pages, consent, password reset (MVP «напрямую»)
 
+> ⚠️ Название относится к «отложенной части фазы 3» (legal pages / consent
+> / password reset). Доступ гостя без стены входа описан отдельно — см.
+> [`2026-11-15-deferred-auth-access-design.md`](./2026-11-15-deferred-auth-access-design.md).
+
 - Date: 2026-07-19
 - Status: approved (autonomous mode per user instruction)
 - Roadmap ref: technical-specification-roadmap.md §4.1, §8 task 5 (email confirmation OK by default; CAPTCHA/SMTP deferred to provider decision)

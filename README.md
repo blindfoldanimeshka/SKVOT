@@ -59,6 +59,9 @@ npm run lint     # eslint .
 - `docs/db.md` — схема БД, RLS, миграции (`supabase/migrations/`).
 - `docs/security-review.md` — отчёт по безопасности (матрица RLS-изоляции).
 - `docs/technical-specification-roadmap.md` — ТЗ и roadmap MVP (исходный план).
-- `docs/out-of-code/` — задачи вне кода (CAPTCHA, SMTP, 152-ФЗ, закрытая бета).
+- `docs/out-of-code/` — задачи вне кода (CAPTCHA, SMTP, 152-ФЗ).
 - `docs/features/` — документация по конкретным фичам.
 - `docs/superpowers/specs/` — дизайн-спеки по фазам.
+- `docs/superpowers/specs/2026-11-15-deferred-auth-access-design.md` — снятие
+  стены входа: что публично для гостя, где нужен вход, как устроен возврат
+  (`authIntent` / `resumeChat`).

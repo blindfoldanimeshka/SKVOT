@@ -11,7 +11,7 @@
 | Tailwind CSS | ^4.3.3 | Утилитарные стили (через `@tailwindcss/vite`, **без PostCSS**) |
 | framer-motion | ^12.42.2 | Анимации (dock-панель, переходы экранов) |
 | lucide-react | ^1.25.0 | Иконки |
-| zod | ^4.4.3 | Валидация форм (профиль, объявление, инвайт) |
+| zod | ^4.4.3 | Валидация форм (профиль, объявление) |
 | @supabase/supabase-js | ^2.110.7 | Клиент БД/Auth/Realtime/Storage |
 | Vitest | ^4.1.10 | Тесты (unit + integration через MSW) |
 | ESLint | ^10.7.0 | Линт (`eslint .`) |

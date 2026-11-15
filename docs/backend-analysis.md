@@ -8,6 +8,8 @@
 > работающий проект). Для любой работы с БД/бэкендом читайте миграции
 > и этот файл, а не `docs/db.md`.
 
+> Бета-гейт удалён 2026-11-15 (миграция 20261115152139): регистрация открыта, таблица invites и RPC удалены.
+
 Стек: **Supabase** (PostgreSQL 15 + Auth + Realtime + Storage + Edge Functions).
 Клиент: `@supabase/supabase-js` v2 (`src/lib/supabase.js`).
 Проект: **MVP-House** (`uwinrqeyixdnemszhxoj`, eu-north-1).
@@ -106,13 +108,6 @@
 - `language text` ∈ `ru|en` DEFAULT 'ru'
 - `updated_at timestamptz`
 
-**`public.invites`** (`202607190005`) — закрытая бета, **только через RPC**
-- `code text PK`, `created_by uuid → auth.users(id)`
-- `used_by uuid → auth.users(id)`, `used_at timestamptz`
-- `note text`, `created_at timestamptz`
-- `expires_at timestamptz DEFAULT now()+30d`
-- индекс `idx_invites_used (used_by) WHERE used_by IS NOT NULL`
-
 ### Storage buckets
 | Бакет | Public? | Лимит | MIME | Путь |
 |---|---|---|---|---|
@@ -138,14 +133,13 @@
 | `storage.avatars` | 🔓 public read | ✅ upload/delete только свой `{user_id}` | ✅ всё | storage policies `Users read/upload/delete own avatar` |
 | `moderation_audit` | ❌ | ❌ (REVOKE ALL, без policy) | ✅ INSERT/SELECT | серверная модерация |
 | `user_settings` | ❌ | ✅ SELECT/INSERT/UPDATE только `(select auth.uid())=user_id` | ✅ всё | 3 политики на `user_settings` |
-| `invites` | ❌ | ❌ (`using(false)` для всех) | ✅ всё | прямой доступ запрещён; только узкие RPC |
 
 **Критические invariant'ы (НЕ нарушать при коде):**
 1. Чтение листингов анонимом/всеми = только `status='active' AND deleted_at IS NULL`. Это core-функционал.
 2. `author_id`, `status`, `created_at` листинга **неизменяемы пользователем** — защищено триггером `private.prepare_listing_update()` (бросает exception). Код НЕ должен пытаться менять их.
 3. `chats` и `chat_participants` — прямой INSERT клиенту **запрещён** (grant только SELECT). Единственный путь создания чата — RPC `open_or_create_chat`.
 4. Сообщения: `sender_id` должен совпадать с `auth.uid()`, плюс отправитель должен быть участником чата.
-5. `moderation_audit` и `invites` — вне клиента. Клиентский код НЕ должен к ним обращаться напрямую.
+5. `moderation_audit` — вне клиента. Клиентский код НЕ должен к ней обращаться напрямую.
 
 ---
 
@@ -156,16 +150,11 @@
 |---|---|---|---|---|
 | `public.open_or_create_chat` | `(p_listing_id uuid) → uuid` | **SECURITY DEFINER** (намеренно) | `authenticated` | Атомарное создание чата + участников. Проверяет: auth, листинг active+не удалён, автор ≠ инициатор. Возвращает `chat_id`. **Единственный путь создания чата.** |
 | `public.listing_cover_path` | `(p_listing_id uuid) → text` | SECURITY DEFINER (читает `listing_images` в обход RLS для публичной ленты) | `anon, authenticated` | Путь первого фото (по `sort_order`, `created_at`). |
-| `public.is_invite_valid` | `(p_code text) → boolean` | SECURITY DEFINER | `anon, authenticated` | Проверка: код существует, `used_by IS NULL`, не просрочен. Без раскрытия данных таблицы. |
-| `public.invite_status` | `(p_code text) → text` | SECURITY DEFINER | `anon, authenticated` | `'valid'|'used'|'expired'|'not_found'`. |
-| `public.claim_invite` | `(p_code text, p_user_id uuid) → boolean` | SECURITY DEFINER | `authenticated` | Помечает инвайт использованным (из Edge Function / вручную). |
 
-> Примечание: миграция `202607190012` временно перевела `is_invite_valid`/
-> `invite_status`/`listing_cover_path` в `SECURITY INVOKER`, но `202607200000`
-> вернул их в `DEFINER` — потому что таблица `invites` имеет `using(false)`,
-> и INVOKER-контекст делал бы функции бесполезными. **Итоговое состояние:
-> все 5 клиентских RPC — DEFINER.** Не меняйте обратно на INVOKER без
-> пересмотра доступа к `invites`.
+> Примечание: миграция `202607190012` временно перевела `listing_cover_path`
+> в `SECURITY INVOKER`, но `202607200000` вернул её в `DEFINER`.
+> **Итоговое состояние: все клиентские RPC — DEFINER.** Не меняйте обратно на
+> INVOKER без явного запроса.
 
 ### Служебные (private, не для клиента — `REVOKE ALL FROM PUBLIC`)
 | Функция | Где | Назначение |
@@ -199,7 +188,6 @@ users ──< messages (sender_id) >── chats (chat_id)
 users ──< reports (reporter_id)              [target_id полиморфный: listing|chat|message]
 users ──< moderation_audit (moderator_id)    [target_type/target_id полиморфные]
 users ──1 user_settings (user_id, PK)
-auth.users ──< invites (created_by, used_by)
 storage.listing-photos ── listing_images.path
 storage.avatars ── users.avatar_path
 ```
@@ -225,7 +213,7 @@ storage.avatars ── users.avatar_path
 > `supabase gen types typescript --project-id uwinrqeyixdnemszhxoj > src/types/database.ts`.
 > Текущий файл **рассинхронизирован** с миграциями: в нём есть
 > `address/lat/lng/is_mock` (добавлены `202607190007`/`202607200001`), но
-> он может не покрывать `user_settings`, `invites`, `telegram_id`,
+> он может не покрывать `user_settings`, `telegram_id`,
 > `avatar_path`. Перед работой с типами — сгенерировать заново из прод-схемы.
 
 ---
@@ -240,10 +228,9 @@ storage.avatars ── users.avatar_path
    не `DELETE FROM`.
 3. **Storage-пути строго по контракту:** `listing/{listing_id}/{uuid}.{ext}`
    и `avatars/{user_id}`. Нарушение → storage RLS отклоняет.
-4. **`moderation_audit` и `invites`** — только server/Edge/SQL-консоль.
-   Клиент обращается к `invites` исключительно через
-   `is_invite_valid` / `invite_status` / `claim_invite`.
-5. **Не трогать `search_path` и `SECURITY DEFINER` у 5 клиентских RPC**
+4. **`moderation_audit`** — только server/Edge/SQL-консоль, клиентом не
+   читается и не пишется (REVOKE ALL без политик).
+5. **Не трогать `search_path` и `SECURITY DEFINER` у клиентских RPC**
    без явного запроса — см. раздел 3.
 6. **RLS-изоляция между пользователями** — священна. Любой код должен
    полагаться на `auth.uid()`, а не передавать ID в аргументах функций,
@@ -257,7 +244,6 @@ storage.avatars ── users.avatar_path
 ---
 
 ## 7. Что НЕ реализовано (задачи вне кода — `docs/out-of-code/`)
-- CAPTCHA при регистрации, SMTP-рассылка, 152-ФЗ (перс. данные),
-  закрытая бета (invites уже есть, но раздача — вручную оператором).
+- CAPTCHA при регистрации, SMTP-рассылка, 152-ФЗ (перс. данные).
 - Нативный Telegram OAuth не используется — `telegram_id` пишется из
   Edge Function `connect-telegram` после валидации подписи Login Widget.

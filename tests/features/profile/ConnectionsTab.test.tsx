@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ConnectionsTab } from '@/features/profile/components/ConnectionsTab'
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -25,6 +25,10 @@ vi.mock('@/features/profile/useConnections', () => ({
   ],
 }))
 
+// Заметка про пробел в покрытии: связка `setUnlinkTarget` → ConfirmDialog → `unlink(id)`
+// здесь не покрыта — провайдеры в ConnectionsTab захардкожены `disabled`, путь мёртв.
+// Тест на «Отвязать → подтверждение → unlink» нужно добавить при включении OAuth-провайдеров.
+
 describe('ConnectionsTab', () => {
   it('renders the heading and service names', () => {
     currentReturn = {
@@ -44,7 +48,7 @@ describe('ConnectionsTab', () => {
     expect(screen.getByText(/vk/i)).toBeInTheDocument()
   })
 
-  it('shows connect buttons for not-connected services and an unlink for connected', () => {
+  it('shows statuses and «Скоро» badges instead of buttons while providers are not configured', () => {
     currentReturn = {
       connections: baseConnections,
       loading: false,
@@ -55,14 +59,27 @@ describe('ConnectionsTab', () => {
       unlink: vi.fn(),
     }
     render(<ConnectionsTab />)
-    const connectButtons = screen.getAllByRole('button', { name: /подключить/i })
-    expect(connectButtons.length).toBe(3)
+
+    // 4 строки в основном списке: telegram исключён и рендерится отдельным блоком
+    expect(screen.getAllByTestId('service-row')).toHaveLength(4)
+
+    // статусы вместо кнопок: google подключён, остальные — нет
+    expect(screen.getByText('Подключено')).toBeInTheDocument()
+    expect(screen.getAllByText('Не подключено')).toHaveLength(3)
+
+    // бейдж «Скоро»: 4 в основном списке + 1 в блоке Telegram
+    expect(screen.getAllByText('Скоро')).toHaveLength(5)
+
+    // кнопок привязки/отвязки нет
     expect(
-      screen.getByRole('button', { name: /отвязать/i }),
-    ).toBeInTheDocument()
+      screen.queryByRole('button', { name: /подключить/i }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /отвязать/i }),
+    ).not.toBeInTheDocument()
   })
 
-  it('calls unlink when the unlink button is clicked and confirmed', () => {
+  it('renders Telegram as a separate block and never opens the unlink dialog', () => {
     const unlink = vi.fn()
     currentReturn = {
       connections: baseConnections,
@@ -75,11 +92,21 @@ describe('ConnectionsTab', () => {
     }
     render(<ConnectionsTab />)
 
-    fireEvent.click(screen.getByRole('button', { name: /отвязать/i }))
-    const dialog = screen.getByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: /отвязать/i }))
+    // отдельный блок Telegram: заголовок и своё имя вне основного списка
+    expect(
+      screen.getByRole('heading', { name: /telegram/i }),
+    ).toBeInTheDocument()
+    expect(screen.getAllByText('Telegram')).toHaveLength(2) // заголовок + строка блока
 
-    expect(unlink).toHaveBeenCalledWith('google')
+    const rows = screen.getAllByTestId('service-row')
+    expect(rows).toHaveLength(4)
+    expect(
+      rows.every((row) => !row.textContent?.includes('Telegram')),
+    ).toBe(true)
+
+    // кнопок «Отвязать» нет — диалог подтверждения не открывается, unlink не вызывается
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(unlink).not.toHaveBeenCalled()
   })
 
   it('surfaces an error message', () => {

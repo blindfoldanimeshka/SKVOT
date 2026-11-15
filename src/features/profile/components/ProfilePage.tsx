@@ -14,13 +14,23 @@ type TabId =
   | 'organizations'
   | 'danger'
 
-const TABS: { id: TabId; label: string }[] = [
+/**
+ * Все вкладки профиля вместе с признаком готовности. В таб-лист попадает только
+ * то, что действительно умеет своё основное действие (`hidden` не задан):
+ * нерабочие вкладки скрываем до готовности, а сам компонент и его контент
+ * оставляем в TAB_CONTENT — чтобы включить вкладку, достаточно убрать `hidden`.
+ */
+const ALL_TABS: { id: TabId; label: string; hidden?: boolean }[] = [
   { id: 'personal', label: 'Личные данные' },
   { id: 'settings', label: 'Аккаунт' },
-  { id: 'connections', label: 'Подключения' },
+  // Подключение: все кнопки привязки захардкожены `disabled` («Скоро»),
+  // OAuth-провайдеры в Supabase не настроены → нажать «Подключить» нельзя.
+  { id: 'connections', label: 'Подключения', hidden: true },
   { id: 'organizations', label: 'Организации' },
   { id: 'danger', label: 'Действия' },
 ]
+
+const TABS = ALL_TABS.filter((tab) => !tab.hidden)
 
 const TAB_CONTENT: Record<TabId, () => ReactElement> = {
   personal: PersonalInfoTab,
@@ -30,8 +40,16 @@ const TAB_CONTENT: Record<TabId, () => ReactElement> = {
   danger: DangerTab,
 }
 
+/** Дефолтная вкладка — она же безопасный фолбэк для скрытой/неизвестной вкладки. */
+const FALLBACK_TAB: TabId = 'personal'
+
 export function ProfilePage() {
-  const [activeTab, setActiveTab] = useNavEntryState<TabId>('profileTab', 'personal')
+  const [storedTab, setActiveTab] = useNavEntryState<TabId>('profileTab', FALLBACK_TAB)
+  // Nav-состояние переживает сокрытие вкладки (и может содержать произвольный id):
+  // если вкладки нет в таб-листе, показываем дефолтную, а не пустую панель.
+  const activeTab: TabId = TABS.some((tab) => tab.id === storedTab)
+    ? storedTab
+    : FALLBACK_TAB
   const ActiveTab = TAB_CONTENT[activeTab]
 
   return (

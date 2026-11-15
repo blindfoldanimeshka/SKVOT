@@ -1,12 +1,5 @@
-// Vercel Function (Edge runtime) — приёмник клиентских ошибок.
+// Vercel Function (Node.js runtime) — приёмник клиентских ошибок.
 //
-// Почему Edge, а не Node: на nodejs26.x тело POST до функции не доходило
-// (`request.text()` возвращал пустую строку, `req.body` бросал `Invalid JSON`),
-// поэтому endpoint отвечал 400 на любой запрос. В Edge тело доступно нативно.
-//  - https://vercel.com/docs/functions/functions-api-reference#fetch-web-standard
-//  - https://vercel.com/docs/functions/runtimes/edge
-//
-// Контракт — Web Standard `fetch`-экспорт, а не legacy `(req, res)`:
 //  - https://vercel.com/docs/functions/functions-api-reference#fetch-web-standard
 //  - https://vercel.com/docs/functions/runtimes/node-js («Create a Node.js function in /api»)
 //
@@ -119,17 +112,9 @@ function empty(status: number, headers: Record<string, string>): Response {
 }
 
 /**
- * Edge-рантайм: в Node-рантайме (nodejs26.x) тело POST до функции не доходило —
- * `request.text()` возвращал пустую строку, `req.body` бросал `Invalid JSON`.
- * В Edge тело запроса доступно нативно, а Buffer/process недоступны, поэтому
- * длину считаем через TextEncoder.
+ * Node-рантайм (nodejs26.x). Тело читаем через `request.text()` в fetch-контракте,
+ * потому что legacy `(req, res)` его не получает (`req.body` бросает `Invalid JSON`).
  */
-export const config = { runtime: 'edge' }
-
-function byteLength(value: string): number {
-  return new TextEncoder().encode(value).length
-}
-
 export default {
   async fetch(request: Request): Promise<Response> {
     const method = request.method.toUpperCase()
@@ -164,12 +149,18 @@ export default {
       // Тело читаем один раз и целиком: `request.text()` — единственный способ,
       // который не зависит от рантаймовых парсеров @vercel/node.
       const raw = await request.text()
-      if (byteLength(raw) > MAX_BODY_BYTES) {
+      if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) {
         return empty(413, headers)
       }
 
       const parsed = parseLogPayload(raw)
       if (!parsed.ok) {
+        // Временная диагностика: на проде тело приходило (contentLength=24), но
+        // парсер отвечал 400 — нужно увидеть фактическое содержимое строки.
+        console.error(
+          '[client-error] reject',
+          JSON.stringify({ status: parsed.status, len: raw.length, sample: JSON.stringify(raw.slice(0, 120)) }),
+        )
         return empty(parsed.status, headers)
       }
 

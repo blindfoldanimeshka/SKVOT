@@ -123,10 +123,18 @@ async function readBody(req: IncomingMessage): Promise<string | null> {
  */
 async function getRawBody(req: IncomingMessage): Promise<string | null> {
   const withBody = req as IncomingMessage & { body?: unknown }
-  if (typeof withBody.body === 'string') return withBody.body
-  if (withBody.body !== undefined && withBody.body !== null) {
-    const serialized = JSON.stringify(withBody.body)
-    return serialized === undefined ? null : serialized
+  try {
+    const parsed = withBody.body
+    if (typeof parsed === 'string') return parsed
+    if (Buffer.isBuffer(parsed)) return parsed.toString('utf8')
+    if (parsed !== undefined && parsed !== null) {
+      const serialized = JSON.stringify(parsed)
+      if (typeof serialized === 'string') return serialized
+    }
+  } catch (err) {
+    // Геттер `body` может бросить (парсер Vercel/уже вычитанный поток):
+    // падать нельзя, ниже пробуем прочитать поток и логируем причину.
+    console.error('[client-error] body-getter-failed', String(err))
   }
   return readBody(req)
 }
@@ -184,6 +192,9 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
 
     const parsed = parseLogPayload(raw)
     if (!parsed.ok) {
+      // Пустое тело — единственная «немая» причина 400: пишем в лог, чтобы её
+      // было видно в Runtime Logs, а не отлаживать вслепую.
+      if (raw.trim() === '') console.error('[client-error] empty-body', method)
       finish(res, parsed.status, corsHeaders)
       return
     }

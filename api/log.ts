@@ -152,6 +152,16 @@ export default {
 
       const parsed = parseLogPayload(raw)
       if (!parsed.ok) {
+        // Диагностика на время выяснения, почему тело пустое на этом рантайме.
+        console.error(
+          '[client-error] reject',
+          JSON.stringify({
+            status: parsed.status,
+            len: raw.length,
+            contentType: request.headers.get('content-type'),
+            contentLength: request.headers.get('content-length'),
+          }),
+        )
         return empty(parsed.status, headers)
       }
 

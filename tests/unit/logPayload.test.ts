@@ -1,5 +1,9 @@
+// Тесты приёмника клиентских ошибок: валидатор parseLogPayload + fetch-хендлер api/log.ts.
+//
+// Хендлер вызывается по Web Standard контракту (export default { fetch(request) }),
+// поэтому моки `IncomingMessage`/`ServerResponse` и типы `node:http` здесь не нужны:
+// используем нативные Request/Response из окружения Node (vitest jsdom их не перекрывает).
 import { describe, expect, it, vi } from 'vitest'
-import type { IncomingMessage, ServerResponse } from 'node:http'
 import handler, {
   MAX_BODY_BYTES,
   MAX_COMPONENT_STACK,
@@ -19,7 +23,7 @@ function okPayload(body: string): ClientErrorPayload {
   return result.payload
 }
 
-describe('parseLogPayload (api/_logPayload.ts)', () => {
+describe('parseLogPayload (api/log.ts)', () => {
   it('принимает минимальное валидное тело', () => {
     expect(parseLogPayload(JSON.stringify({ message: 'boom' }))).toEqual({
       ok: true,
@@ -135,59 +139,39 @@ describe('parseLogPayload (api/_logPayload.ts)', () => {
   })
 })
 
-// --- Смоук-тесты хендлера api/log.ts на моках req/res (без Vercel-рантайма) ---
+// --- Смоук-тесты хендлера api/log.ts через fetch-контракт (Request → Response) ---
 
 const PROD = 'https://skvot.vercel.app'
 const PREVIEW = 'https://skvot-git-main-blindfoldstudios.vercel.app'
 const EVIL = 'https://evil.example.com'
+const ENDPOINT = `${PROD}/api/log`
 
-function mockReq(opts: { method?: string; origin?: string | null; body?: string | Buffer }): IncomingMessage {
-  const chunks = opts.body === undefined ? [] : [Buffer.from(opts.body)]
-  const headers: Record<string, string> = {}
+interface CallOptions {
+  method?: string
+  /** null — заголовок Origin отсутствует (curl, сервер-к-серверу) */
+  origin?: string | null
+  body?: string | Uint8Array
+  extraHeaders?: Record<string, string>
+}
+
+async function call(opts: CallOptions = {}): Promise<Response> {
+  const method = (opts.method ?? 'POST').toUpperCase()
+  const headers: Record<string, string> = { ...opts.extraHeaders }
   if (opts.origin !== null && opts.origin !== undefined) headers.origin = opts.origin
-  return {
-    method: opts.method ?? 'POST',
-    headers,
-    async *[Symbol.asyncIterator]() {
-      for (const c of chunks) yield c
-    },
-  } as unknown as IncomingMessage
+
+  // GET/HEAD не могут иметь тело — Request на этом бросает TypeError
+  const body = method === 'GET' || method === 'HEAD' ? undefined : opts.body
+  return handler.fetch(new Request(ENDPOINT, { method, headers, body }))
 }
 
-interface MockRes {
-  statusCode: number
-  ended: boolean
-  headers: Record<string, string>
-  setHeader(name: string, value: string): void
-  end(): void
-}
-
-function mockRes(): MockRes {
-  return {
-    statusCode: 0,
-    ended: false,
-    headers: {},
-    setHeader(name: string, value: string) {
-      this.headers[name] = value
-    },
-    end() {
-      this.ended = true
-    },
-  }
-}
-
-async function call(req: IncomingMessage): Promise<MockRes> {
-  const res = mockRes()
-  await handler(req, res as unknown as ServerResponse)
-  return res
-}
-
-describe('api/log handler', () => {
+describe('api/log handler (fetch)', () => {
   it('POST с валидным телом и разрешённым origin → 204 и одна строка в console.error', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const res = await call(mockReq({ origin: PROD, body: JSON.stringify({ message: 'boom', junk: 'x' }) }))
-    expect(res.statusCode).toBe(204)
-    expect(res.headers['Access-Control-Allow-Origin']).toBe(PROD)
+    const res = await call({ origin: PROD, body: JSON.stringify({ message: 'boom', junk: 'x' }) })
+    expect(res.status).toBe(204)
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe(PROD)
+    expect(res.headers.get('Vary')).toBe('Origin')
+    expect(await res.text()).toBe('')
     expect(errSpy).toHaveBeenCalledTimes(1)
     const [tag, line] = errSpy.mock.calls[0] as [string, string]
     expect(tag).toBe('[client-error]')
@@ -197,75 +181,103 @@ describe('api/log handler', () => {
 
   it('POST без Origin (curl) проходит', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const res = await call(mockReq({ origin: null, body: '{"message":"probe"}' }))
-    expect(res.statusCode).toBe(204)
+    const res = await call({ origin: null, body: '{"message":"probe"}' })
+    expect(res.status).toBe(204)
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull()
     errSpy.mockRestore()
   })
 
-  it('берёт уже распарсенное тело из req.body (рантайм Vercel), поток пуст → 204', async () => {
+  it('тело читается через request.text(): байтовый Buffer без content-type → 204', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    // Vercel (@vercel/node) парсит JSON сам, поток к этому моменту вычитан:
-    // без чтения req.body валидный запрос получал 400 в проде.
-    const req = {
-      method: 'POST',
-      headers: { origin: PROD },
-      body: { message: 'preparsed', stack: 'at x' },
-      async *[Symbol.asyncIterator]() {},
-    } as unknown as IncomingMessage
-    const res = await call(req)
-    expect(res.statusCode).toBe(204)
+    // Так летит navigator.sendBeacon с Blob('application/json'): тело — байты,
+    // и legacy-рантайм @vercel node не давал к нему доступ (400 в проде).
+    const body = new TextEncoder().encode(JSON.stringify({ message: 'кириллица', stack: 'at x' }))
+    const res = await call({ origin: PROD, body })
+    expect(res.status).toBe(204)
     const line = errSpy.mock.calls[0]?.[1] as string
-    expect(JSON.parse(line)).toEqual({ message: 'preparsed', stack: 'at x' })
+    expect(JSON.parse(line)).toEqual({ message: 'кириллица', stack: 'at x' })
     errSpy.mockRestore()
   })
 
   it('превью-домен skvot-*-blindfoldstudios разрешён', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const res = await call(mockReq({ origin: PREVIEW, body: '{"message":"m"}' }))
-    expect(res.statusCode).toBe(204)
-    expect(res.headers['Access-Control-Allow-Origin']).toBe(PREVIEW)
+    const res = await call({ origin: PREVIEW, body: '{"message":"m"}' })
+    expect(res.status).toBe(204)
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe(PREVIEW)
     errSpy.mockRestore()
   })
 
   it('чужой origin → 403 на POST и на preflight; на своём origin отвечает 204', async () => {
-    expect((await call(mockReq({ origin: EVIL, body: '{"message":"m"}' }))).statusCode).toBe(403)
-    const preflight = await call(mockReq({ method: 'OPTIONS', origin: EVIL }))
-    expect(preflight.statusCode).toBe(403)
-    expect(preflight.headers['Access-Control-Allow-Origin']).toBeUndefined()
-    const ok = await call(mockReq({ method: 'OPTIONS', origin: PROD }))
-    expect(ok.statusCode).toBe(204)
-    expect(ok.headers['Access-Control-Allow-Methods']).toContain('POST')
+    const post = await call({ origin: EVIL, body: '{"message":"m"}' })
+    expect(post.status).toBe(403)
+    const preflight = await call({ method: 'OPTIONS', origin: EVIL })
+    expect(preflight.status).toBe(403)
+    expect(preflight.headers.get('Access-Control-Allow-Origin')).toBeNull()
+    expect(preflight.headers.get('Vary')).toBe('Origin')
+    const ok = await call({ method: 'OPTIONS', origin: PROD })
+    expect(ok.status).toBe(204)
+    expect(ok.headers.get('Access-Control-Allow-Methods')).toContain('POST')
+    expect(ok.headers.get('Access-Control-Allow-Headers')).toBe('content-type')
+    expect(ok.headers.get('Access-Control-Max-Age')).toBe('86400')
   })
 
   it('localhost:5173 разрешён только вне продакшена', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const original = process.env.VERCEL_ENV
     try {
       delete process.env.VERCEL_ENV
-      const dev = await call(mockReq({ origin: 'http://localhost:5173', body: '{"message":"m"}' }))
-      expect(dev.statusCode).toBe(204)
+      const dev = await call({ origin: 'http://localhost:5173', body: '{"message":"m"}' })
+      expect(dev.status).toBe(204)
       process.env.VERCEL_ENV = 'production'
-      const prod = await call(mockReq({ origin: 'http://localhost:5173' }))
-      expect(prod.statusCode).toBe(403)
+      const prod = await call({ origin: 'http://localhost:5173', body: '{"message":"m"}' })
+      expect(prod.status).toBe(403)
     } finally {
       if (original === undefined) delete process.env.VERCEL_ENV
       else process.env.VERCEL_ENV = original
+      errSpy.mockRestore()
     }
   })
 
   it('не-POST → 405 с Allow', async () => {
-    const res = await call(mockReq({ method: 'GET', origin: null }))
-    expect(res.statusCode).toBe(405)
-    expect(res.headers.Allow).toBe('POST, OPTIONS')
+    const res = await call({ method: 'GET', origin: null })
+    expect(res.status).toBe(405)
+    expect(res.headers.get('Allow')).toBe('POST, OPTIONS')
+    expect(await res.text()).toBe('')
   })
 
   it('тело больше 8 КБ → 413', async () => {
-    const res = await call(mockReq({ origin: PROD, body: Buffer.alloc(MAX_BODY_BYTES + 1, 0x61) }))
-    expect(res.statusCode).toBe(413)
+    const res = await call({ origin: PROD, body: 'a'.repeat(MAX_BODY_BYTES + 1) })
+    expect(res.status).toBe(413)
+  })
+
+  it('лимит в байтах, а не в символах: многобайтное тело → 413', async () => {
+    // 8172 символа «й» ≈ 16 КБ в UTF-8 при длине строки меньше MAX_BODY_BYTES
+    const body = JSON.stringify({ message: 'й'.repeat(MAX_BODY_BYTES - 20) })
+    expect(body.length).toBeLessThan(MAX_BODY_BYTES)
+    expect(Buffer.byteLength(body, 'utf8')).toBeGreaterThan(MAX_BODY_BYTES)
+    const res = await call({ origin: PROD, body })
+    expect(res.status).toBe(413)
   })
 
   it('битый JSON → 400 с пустым телом', async () => {
-    const res = await call(mockReq({ origin: PROD, body: '{"message":' }))
-    expect(res.statusCode).toBe(400)
-    expect('body' in res).toBe(false)
+    const res = await call({ origin: PROD, body: '{"message":' })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toBe('')
+  })
+
+  it('пустое тело → 400 без диагностических логов', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await call({ origin: PROD, body: '' })
+    expect(res.status).toBe(400)
+    expect(errSpy).not.toHaveBeenCalled()
+    errSpy.mockRestore()
+  })
+
+  it('POST без тела вообще (null body) → 400 и функция жива', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await call({ origin: PROD })
+    expect(res.status).toBe(400)
+    expect(errSpy).not.toHaveBeenCalled()
+    errSpy.mockRestore()
   })
 })

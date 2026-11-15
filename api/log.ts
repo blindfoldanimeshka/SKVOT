@@ -1,12 +1,16 @@
-// Vercel Serverless Function (Node.js) — приёмник клиентских ошибок.
+// Vercel Function (Node.js runtime) — приёмник клиентских ошибок.
 //
-// По актуальной документации Vercel:
-//  - в zero-config проекте (наш кейс: framework "vite") файл `api/**/*.ts`
-//    автоматически собирается билдером `@vercel/node` — vercel.json не нужен;
-//  - функция без доп. конфигурации по умолчанию исполняется на Node.js-рантайме,
-//    поэтому `export const config = { runtime: 'nodejs' }` не требуется;
-//    https://vercel.com/docs/functions/configuring-functions/runtime
-//  - классическая сигнатура `(req, res)` с default-экспортом поддерживается.
+// Контракт — Web Standard `fetch`-экспорт, а не legacy `(req, res)`:
+//  - https://vercel.com/docs/functions/functions-api-reference#fetch-web-standard
+//  - https://vercel.com/docs/functions/runtimes/node-js («Create a Node.js function in /api»)
+//
+// Почему переписали. На проде (рантайм `nodejs26.x`) сигнатура
+// `export default async function handler(req: IncomingMessage, res: ServerResponse)`
+// не получала тело: `@vercel/node` заранее парсит запрос по `Content-Type` и прячет
+// результат в геттере `req.body`, а поток к этому моменту уже вычитан. Геттер бросает
+// `Invalid JSON` на битом/пустом теле и на `text/plain` от `navigator.sendBeacon` —
+// в результате ЛЮБОЙ POST отвечал 400. В fetch-контракте рантаймовых парсеров нет:
+// тело читаем ровно один раз через `await request.text()`.
 //
 // ВАЖНО: валидация тела живёт в ЭТОМ ЖЕ файле, а не в отдельном модуле.
 // Вынос в `./_logPayload` ломал прод: `@vercel/node` компилирует файлы в ESM и
@@ -14,8 +18,6 @@
 // (`ERR_MODULE_NOT_FOUND: /var/task/api/_logPayload`). Держим одним файлом.
 //
 // Логируется ровно одна строка через console.error — её видно в Vercel Runtime Logs.
-
-import type { IncomingMessage, ServerResponse } from 'node:http'
 
 export interface ClientErrorPayload {
   message: string
@@ -38,6 +40,9 @@ export const MAX_SOURCE = 500
 export const MAX_URL = 500
 export const MAX_COMPONENT_STACK = 4000
 
+/** Методы, которые хендлер принимает: используется и в `Allow`, и в CORS-префлайте. */
+const ALLOWED_METHODS = 'POST, OPTIONS'
+
 function clip(value: string, max: number): string {
   return value.length > max ? value.slice(0, max) : value
 }
@@ -46,7 +51,7 @@ function clip(value: string, max: number): string {
  * Парсит и нормализует JSON-строку тела запроса.
  * - битый JSON / не-объект / отсутствие или неверный тип `message` → { ok: false, status: 400 }
  * - тело длиннее MAX_BODY_BYTES → { ok: false, status: 413 }
- *   (байтовый лимит дополнительно контролируется на чтении потока)
+ *   (байтовый лимит контролируется в хендлере по `Buffer.byteLength`)
  * - неизвестные поля отбрасываются, известные строки обрезаются, `ts` принимается
  *   только конечным числом.
  */
@@ -102,108 +107,60 @@ function isAllowedOrigin(origin: string): boolean {
   return process.env.VERCEL_ENV !== 'production' && origin === LOCAL_ORIGIN
 }
 
-/** Читает тело с лимитом по байтам; null — если лимит превышен. */
-async function readBody(req: IncomingMessage): Promise<string | null> {
-  const chunks: Buffer[] = []
-  let size = 0
-  for await (const chunk of req) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as ArrayBuffer)
-    size += buf.length
-    if (size > MAX_BODY_BYTES) return null
-    chunks.push(buf)
-  }
-  return Buffer.concat(chunks).toString('utf8')
+/** Ответ всегда с пустым телом: репортёру нужен только статус. */
+function empty(status: number, headers: Record<string, string>): Response {
+  return new Response(null, { status, headers })
 }
 
-/**
- * Достаёт тело запроса. На Vercel рантайм (@vercel/node) парсит JSON заранее и
- * кладёт результат в `req.body`, а поток к этому моменту уже вычитан — поэтому
- * сначала смотрим в `req.body`, и только потом читаем поток (тесты, другие рантаймы).
- * Иначе валидные запросы приходили пустыми и получали 400.
- */
-async function getRawBody(req: IncomingMessage): Promise<string | null> {
-  const withBody = req as IncomingMessage & { body?: unknown }
-  try {
-    const parsed = withBody.body
-    if (typeof parsed === 'string') return parsed
-    if (Buffer.isBuffer(parsed)) return parsed.toString('utf8')
-    if (parsed !== undefined && parsed !== null) {
-      const serialized = JSON.stringify(parsed)
-      if (typeof serialized === 'string') return serialized
-    }
-  } catch (err) {
-    // Геттер `body` может бросить (парсер Vercel/уже вычитанный поток):
-    // падать нельзя, ниже пробуем прочитать поток и логируем причину.
-    console.error('[client-error] body-getter-failed', String(err))
-  }
-  return readBody(req)
-}
+export default {
+  async fetch(request: Request): Promise<Response> {
+    const method = request.method.toUpperCase()
+    const origin = request.headers.get('origin')
+    const allowed = origin !== null && isAllowedOrigin(origin)
 
-function finish(res: ServerResponse, status: number, headers: Record<string, string>): void {
-  for (const [key, value] of Object.entries(headers)) res.setHeader(key, value)
-  res.statusCode = status
-  res.end() // тело всегда пустое — не отдаём ничего сверх статуса
-}
-
-export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const method = req.method ?? 'GET'
-  const originHeader = req.headers.origin
-  const origin = typeof originHeader === 'string' ? originHeader : null
-  const corsHeaders: Record<string, string> = { Vary: 'Origin' }
-  if (origin !== null && isAllowedOrigin(origin)) {
-    corsHeaders['Access-Control-Allow-Origin'] = origin
-    corsHeaders['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-    corsHeaders['Access-Control-Allow-Headers'] = 'content-type'
-    corsHeaders['Access-Control-Max-Age'] = '86400'
-  }
-  const allowed = origin !== null && isAllowedOrigin(origin)
-
-  try {
-    // Preflight: разрешённый origin → 204, любой другой (или без Origin) → 403
-    if (method === 'OPTIONS') {
-      finish(res, allowed ? 204 : 403, corsHeaders)
-      return
+    // `Vary: Origin` отдаём всегда — ответ зависит от проверяемого заголовка.
+    const headers: Record<string, string> = { Vary: 'Origin' }
+    if (allowed && origin !== null) {
+      headers['Access-Control-Allow-Origin'] = origin
+      headers['Access-Control-Allow-Methods'] = ALLOWED_METHODS
+      headers['Access-Control-Allow-Headers'] = 'content-type'
+      headers['Access-Control-Max-Age'] = '86400'
     }
 
-    // Принимаем только POST
-    if (method !== 'POST') {
-      res.setHeader('Allow', 'POST, OPTIONS')
-      finish(res, 405, corsHeaders)
-      return
-    }
-
-    // CORS для браузерных запросов: запросы без Origin (curl, сервер-к-серверу) пропускаем
-    if (origin !== null && !allowed) {
-      finish(res, 403, corsHeaders)
-      return
-    }
-
-    let raw: string | null
     try {
-      raw = await getRawBody(req)
+      // Preflight: разрешённый origin → 204, любой другой (или без Origin) → 403
+      if (method === 'OPTIONS') {
+        return empty(allowed ? 204 : 403, headers)
+      }
+
+      // Принимаем только POST
+      if (method !== 'POST') {
+        return empty(405, { ...headers, Allow: ALLOWED_METHODS })
+      }
+
+      // CORS для браузерных запросов: запросы без Origin (curl, сервер-к-серверу) пропускаем
+      if (origin !== null && !allowed) {
+        return empty(403, headers)
+      }
+
+      // Тело читаем один раз и целиком: `request.text()` — единственный способ,
+      // который не зависит от рантаймовых парсеров @vercel/node.
+      const raw = await request.text()
+      if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) {
+        return empty(413, headers)
+      }
+
+      const parsed = parseLogPayload(raw)
+      if (!parsed.ok) {
+        return empty(parsed.status, headers)
+      }
+
+      // Одна строка в Runtime Logs: [client-error] {payload}
+      console.error('[client-error]', JSON.stringify(parsed.payload))
+      return empty(204, headers)
     } catch {
-      finish(res, 400, corsHeaders)
-      return
+      // Репортёр не должен уметь ронять функцию: битое/оборванное тело → обычный 400
+      return empty(400, headers)
     }
-    if (raw === null || Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) {
-      finish(res, 413, corsHeaders)
-      return
-    }
-
-    const parsed = parseLogPayload(raw)
-    if (!parsed.ok) {
-      // Пустое тело — единственная «немая» причина 400: пишем в лог, чтобы её
-      // было видно в Runtime Logs, а не отлаживать вслепую.
-      if (raw.trim() === '') console.error('[client-error] empty-body', method)
-      finish(res, parsed.status, corsHeaders)
-      return
-    }
-
-    // Одна строка в Runtime Logs: [client-error] {payload}
-    console.error('[client-error]', JSON.stringify(parsed.payload))
-    finish(res, 204, corsHeaders)
-  } catch {
-    // Репортёр не должен уметь ронять функцию
-    finish(res, 400, corsHeaders)
-  }
+  },
 }

@@ -155,12 +155,6 @@ export default {
 
       const parsed = parseLogPayload(raw)
       if (!parsed.ok) {
-        // Временная диагностика: на проде тело приходило (contentLength=24), но
-        // парсер отвечал 400 — нужно увидеть фактическое содержимое строки.
-        console.error(
-          '[client-error] reject',
-          JSON.stringify({ status: parsed.status, len: raw.length, sample: JSON.stringify(raw.slice(0, 120)) }),
-        )
         return empty(parsed.status, headers)
       }
 

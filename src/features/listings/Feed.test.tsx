@@ -17,14 +17,22 @@ const listing = {
 }
 
 const listListings = vi.fn()
+const recordListingView = vi.fn()
 
 vi.mock('@/features/listings/api', () => ({
   listListings: (...args: unknown[]) => listListings(...args),
+  recordListingView: (...args: unknown[]) => recordListingView(...args),
+}))
+
+// Аналитика не нужна в структурном тесте ленты, а без токена она ещё и шумит в warn.
+vi.mock('@/features/analytics/trackEvent', () => ({
+  trackEvent: vi.fn().mockResolvedValue(undefined),
 }))
 
 describe('Feed', () => {
   beforeEach(() => {
     listListings.mockReset()
+    recordListingView.mockReset()
   })
 
   it('renders cards after loading when data is returned', async () => {
@@ -92,5 +100,39 @@ describe('Feed', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('в ленте нет вложенных интерактивов, а карусель не открывает объявление', async () => {
+    // mock-объявление: лента сама отдаёт ему три фото, то есть карусель с кнопками.
+    const mockListing = { ...listing, is_mock: true }
+    listListings.mockResolvedValue({ data: [mockListing], error: null, count: 1 })
+
+    const { Feed } = await import('./Feed')
+    const onOpen = vi.fn()
+    const { container } = render(<Feed onOpen={onOpen} />)
+
+    const openCard = await screen.findByRole('button', { name: 'Открыть объявление: Москва' })
+    // Фото для mock-объявления приходят вторым рендером (лента отдаёт их из
+    // getMockPhotoUrls), поэтому карусель ждём, а не предполагаем.
+    const arrow = await screen.findByRole('button', { name: 'Следующее фото' })
+    expect(arrow).toBeInTheDocument()
+
+    // Главный инвариант: ни один button/a не содержит внутри себя интерактив.
+    // Раньше стрелки карусели лежали внутри кнопки карточки, и из-за этого браузер
+    // ронял «<button> cannot be a descendant of <button>» на каждом тесте с лентой.
+    const INTERACTIVE = 'a[href], button, input, select, textarea, [role="button"]'
+    const interactive = Array.from(container.querySelectorAll<HTMLElement>(INTERACTIVE))
+    expect(interactive.length).toBeGreaterThan(0)
+    for (const node of interactive) {
+      expect(node.querySelector(INTERACTIVE)).toBeNull()
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Фото 2 из 3' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Следующее фото' }))
+    expect(onOpen).not.toHaveBeenCalled()
+
+    fireEvent.click(openCard)
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'l1' }))
   })
 })

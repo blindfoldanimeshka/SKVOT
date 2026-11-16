@@ -44,11 +44,21 @@ function preview(n: { type: string; payload: Record<string, unknown> | null }): 
   return ''
 }
 
-export function NotificationBell() {
+export interface NotificationBellProps {
+  /**
+   * Непрочитанные чаты. Раньше этот счётчик был бейджем на пункте «Чаты»
+   * нижнего дока; док убрали — счётчик добавляется к колокольчику, чтобы
+   * не терять информацию. Без проброса ведёт себя как раньше.
+   */
+  unreadTotal?: number
+}
+
+export function NotificationBell({ unreadTotal = 0 }: NotificationBellProps) {
   const { user } = useAuth()
   const { items, unreadCount, markOneRead, markAll } = useNotifications()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const totalUnread = unreadCount + unreadTotal
 
   useEffect(() => {
     if (!open) return
@@ -68,7 +78,7 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label={`Уведомления${unreadCount ? `, ${unreadCount} непрочитанных` : ''}`}
+        aria-label={`Уведомления${totalUnread ? `, ${totalUnread} непрочитанных` : ''}`}
         aria-expanded={open}
         className="relative inline-flex h-9 w-9 items-center justify-center rounded-full text-foreground transition hover:bg-muted/60"
       >
@@ -86,9 +96,9 @@ export function NotificationBell() {
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
         </svg>
-        {unreadCount > 0 && (
+        {totalUnread > 0 && (
           <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-white">
-            {unreadCount > 9 ? '9+' : unreadCount}
+            {totalUnread > 9 ? '9+' : totalUnread}
           </span>
         )}
       </button>

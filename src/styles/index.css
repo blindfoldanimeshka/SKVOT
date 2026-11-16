@@ -159,89 +159,14 @@ h1, h2, h3 {
     var(--color-surface);
 }
 
-/* === Dock «Рейка» ===
-   Высота дока — единый источник правды: MenuBar красит полосу по этим
-   переменным, AppShell отступает контент снизу calc(var(--dock-h) + 24px),
-   поэтому карточки/цена/адрес не уходят под док ни на 1280×900, ни на 390×844. */
-:root {
-  --dock-h: 84px;
-  --dock-h-compact: 56px;
-  /* Полоса почти непрозрачная (α .97): белый текст страницы не просвечивает
-     сквозь док; backdrop-blur остался как страховка на скролле. */
-  --dock-bg: rgb(8, 8, 11);
-  /* Риски линейки: мелкие каждые 24px, крупные (чуть светлее) каждые 120px.
-     Контраст поднят под плотный фон (.18→.22 / .32→.40), иначе риски тонут. */
-  --dock-tick: rgba(255, 255, 255, 0.22);
-  --dock-tick-strong: rgba(255, 255, 255, 0.4);
-  /* Подписи/иконки дока: muted-foreground (0.6) с моно-10px на плотном фоне
-     бледнеет — держим отдельными токенами. */
-  --dock-label-idle: rgba(255, 255, 255, 0.72);
-  --dock-icon-idle: rgba(255, 255, 255, 0.65);
+/* Строка навигации в шапке на мобильном: пункты прокручиваются по горизонтали,
+   но скроллбар съел бы высоту шапки и повёл себя как «приложение», а не как
+   сайт. Firefox — scrollbar-width, Safari/Chrome — псевдоэлемент. */
+.nav-scroll {
+  scrollbar-width: none;
 }
 
-@media (max-width: 420px) {
-  :root {
-    --dock-h: 72px;
-    --dock-h-compact: 48px;
-  }
-}
-
-/* Два слоя штрихов одним элементом: плашка 120px/24px с одной риской внутри,
-   повторяется по горизонтали (repeat-x), высота плашки = длина штриха. */
-.dock-rules {
-  height: 14px;
-  background-image:
-    repeating-linear-gradient(to right, var(--dock-tick-strong) 0 1px, transparent 1px 120px),
-    repeating-linear-gradient(to right, var(--dock-tick) 0 1px, transparent 1px 24px);
-  background-size: 120px 14px, 24px 10px;
-  background-repeat: repeat-x;
-  background-position: 0 0;
-}
-
-/* Фон полосы дока — токеном, чтобы он совпадал с «подъёмом» ниже. */
-.dock-bar {
-  background-color: var(--dock-bg);
-}
-
-/* «Подъём» над доком: 24px градиент цвет→прозрачный, чтобы контент не
-   обрывался резкой кромкой полосы. */
-.dock-lift {
-  height: 24px;
-  background-image: linear-gradient(to top, var(--dock-bg), transparent);
-}
-
-/* Подписи дока: системный моно-стек, 10px, uppercase, разреженный трекинг.
-   line-height: 1 — подпись не обрезается нижней кромкой полосы. */
-.dock-label {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  line-height: 1;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-}
-
-/* Точка-индикатор активного пункта (мобильный): мягкое свечение. Тень живёт на
-   элементе, поэтому гаснет вместе с opacity при уходе индикатора. */
-.dock-dot {
-  box-shadow: 0 0 8px 1px rgba(125, 57, 235, 0.7);
-}
-
-/* Микродвижения дока (нажатие, pop иконки, bounce скобы, уклон «губок», бейдж,
-   точка) задаются пружинами в src/components/layout/MenuBar.tsx, их цели —
-   inline-стили от motion. Здесь — страховка prefers-reduced-motion: transform
-   перечисленных слоёв целиком декоративный, при reduce его быть не должно.
-   Скобы ([data-dock-bracket]) в списке нет намеренно: через x/width она ЕДЕТ,
-   это позиционирование активного пункта, а не украшение. */
-@media (prefers-reduced-motion: reduce) {
-  [data-dock-icon],
-  [data-dock-press],
-  [data-dock-pop],
-  [data-dock-label],
-  [data-dock-badge],
-  [data-dock-dot],
-  [data-dock-bracket-frame],
-  [data-dock-lip] {
-    transform: none !important;
-  }
+.nav-scroll::-webkit-scrollbar {
+  display: none;
 }
 

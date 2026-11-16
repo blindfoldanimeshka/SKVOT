@@ -4,6 +4,7 @@ import type { Database } from '@/types/database'
 import type { ListingFilters } from './types'
 import { listListings, recordListingView } from './api'
 import { listPhotosMap } from '@/features/photos/photoApi'
+import { useMediaQuery } from '@/features/photos/media'
 import { getMockPhotoUrls } from './mockPhotos'
 import { ListingCard } from './ListingCard'
 import { Pagination } from '@/components/Pagination'
@@ -25,6 +26,16 @@ const PAGE_SIZE = 10
 /** Задержка коммита текста города в фильтры: поле остаётся мгновенным,
  *  а запрос в Supabase уходит, когда пользователь остановился печатать. */
 const CITY_DEBOUNCE_MS = 300
+
+/**
+ * Плейсхолдер города. «Например, Москва» в 16px требует ~140px, а в сетке
+ * фильтра на 390px полю достаётся ~99px и на 640px ~121px — подпись обрезалась.
+ * Шрифт у поля тут не уменьшить: `button, input, textarea, select { font: inherit }`
+ * в src/styles/index.css лежит вне слоёв и перебивает tailwind-овские `text-*`
+ * (то есть `text-sm` в inputClass сейчас вообще не действует). Поэтому на
+ * узких экранах подсказка просто короче, а с 768px — снова полная.
+ */
+const NARROW_VIEWPORT_QUERY = '(max-width: 767px)'
 
 const flushNoop = () => undefined
 
@@ -102,6 +113,8 @@ export function Feed({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const reducedMotion = useReducedMotion()
+  // Только подсказка: на узких экранах она короче, чтобы влезать в поле.
+  const isNarrowViewport = useMediaQuery(NARROW_VIEWPORT_QUERY)
 
   useEffect(() => {
     let active = true
@@ -214,7 +227,7 @@ export function Feed({
             type="text"
             value={cityInput}
             onChange={(event) => setCityInput(event.target.value)}
-            placeholder="Например, Москва"
+            placeholder={isNarrowViewport ? 'Москва' : 'Например, Москва'}
             className={`${inputClass} mt-1 w-full`}
           />
         </label>

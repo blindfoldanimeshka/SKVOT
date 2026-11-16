@@ -62,7 +62,7 @@ export function NotificationPanel({
         animate="visible"
         exit="exit"
         transition={panelTransition}
-        className="absolute bottom-[96px] left-1/2 z-50 w-80 -translate-x-1/2 overflow-hidden rounded-2xl bg-surface shadow-[var(--shadow-float)] backdrop-blur-xl"
+        className="fixed bottom-6 left-1/2 z-50 w-80 -translate-x-1/2 overflow-hidden rounded-2xl bg-surface shadow-[var(--shadow-float)] backdrop-blur-xl"
       >
         <div className="px-4 py-3">
           <h2 className="font-display text-sm text-foreground">Уведомления</h2>

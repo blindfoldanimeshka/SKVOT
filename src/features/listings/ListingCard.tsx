@@ -32,7 +32,6 @@ export function ListingCard({ listing, onOpen, photoUrls }: ListingCardProps) {
        error). `relative` — чтобы кнопка-оверлей внизу растягивалась ровно по карточке.
        Остальные классы (скругление, фон, тень, hover-подъём) — те же, что были. */
     <article
-      data-cursor="view"
       className="group relative flex flex-col overflow-hidden rounded-[8px] bg-surface text-left shadow-[var(--shadow-surface)] transition-all duration-[200ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-1 hover:border-primary/50 hover:shadow-[var(--shadow-raised)]"
     >
       {photoUrls && photoUrls.length > 0 ? (

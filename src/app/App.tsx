@@ -1,13 +1,7 @@
-import { createContext, useContext, useEffect, useRef, useState, Suspense, lazy } from 'react'
+import { createContext, useContext, useEffect, useState, Suspense, lazy } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { SearchIcon } from '@/components/icons/search'
-import { PlusIcon } from '@/components/icons/plus'
-import { HomeIcon } from '@/components/icons/home'
-import { MessageSquareIcon } from '@/components/icons/message-square'
-import { UserIcon } from '@/components/icons/user'
 import type { Database } from '@/types/database'
-import { AppShell } from '@/components/layout/AppShell'
-import { MenuBar, type MenuBarItem } from '@/components/layout/MenuBar'
+import { AppShell, type AppShellNavProps } from '@/components/layout/AppShell'
 import { isSupabaseConfigured } from '@/lib/env'
 import { AuthProvider } from '@/features/auth/AuthProvider'
 import { useAuth } from '@/features/auth/useAuth'
@@ -15,8 +9,7 @@ import { AuthScreen } from '@/features/auth/AuthScreen'
 import { useUnreadCounts } from '@/features/chat/useUnreadCounts'
 import { NavigationProvider } from '@/app/navigation/NavigationProvider'
 import { useNav } from '@/app/navigation/NavigationProvider'
-import { CustomCursor } from '@/components/CustomCursor'
-import type { NavParams } from '@/app/navigation/types'
+import type { NavParams, View } from '@/app/navigation/types'
 
 // Lazy-loaded heavy screens
 const NewListing = lazy(() => import('@/app/screens/NewListing').then((m) => ({ default: m.NewListing })))
@@ -112,25 +105,6 @@ function PageStack({
 
 type ListingRow = Database['public']['Tables']['listings']['Row']
 
-type View =
-  | 'home'
-  | 'new'
-  | 'mine'
-  | 'detail'
-  | 'profile'
-  | 'chats'
-  | 'thread'
-  | 'privacy'
-  | 'terms'
-
-const NAV_ITEMS: MenuBarItem[] = [
-  { key: 'home', label: 'Поиск', icon: SearchIcon },
-  { key: 'new', label: 'Новое', icon: PlusIcon },
-  { key: 'mine', label: 'Мои', icon: HomeIcon },
-  { key: 'chats', label: 'Чаты', icon: MessageSquareIcon },
-  { key: 'profile', label: 'Профиль', icon: UserIcon },
-]
-
 // Отложенная авторизация: читать проект можно без входа, вход требуется
 // только на действиях. Клик по такому действию открывает экран входа как
 // обычный view стека (не модалку) и запоминает намерение — куда вернуться
@@ -150,95 +124,6 @@ const AUTH_VIEW_HINTS: Partial<Record<View, string>> = {
   chats: 'Войдите, чтобы открыть чаты',
   thread: 'Войдите, чтобы открыть переписку',
   profile: 'Войдите, чтобы открыть профиль',
-}
-
-// Раздел дока, которому принадлежит экран. `detail`/`thread` здесь нет: это
-// вложенные экраны, ни одна кнопка не активна (скоба прячется) — как и раньше.
-const TOP_LEVEL: Record<string, View> = {
-  home: 'home',
-  new: 'new',
-  mine: 'mine',
-  chats: 'chats',
-  profile: 'profile',
-}
-
-// Экраны, на которых док живёт. Юридические страницы (`privacy`/`terms`) и
-// экран входа (`authActive`) дока не имеют — условия ниже повторяют блоки
-// разметки 1:1, включая «detail/thread нужен свой params».
-const DOCK_VIEWS: readonly View[] = ['home', 'new', 'mine', 'detail', 'chats', 'thread', 'profile']
-
-/**
- * Единственный инстанс дока на всё приложение. Раньше его рендерили семь
- * блоков страниц внутри `<PageTransition>` — из-за навигации док монтировался
- * заново, и «переезд» скобы, pop иконки и bounce скобы не успевали сыграть:
- * новому экземпляру не откуда ехать. Теперь док — сиблинг стека экранов,
- * состояние (пружина скобы, compact) переживает смену экрана.
- */
-function MenuNav({
-  view,
-  screenKey,
-  onNavigate,
-  unreadTotal,
-  onToggleNotifications,
-}: {
-  view: View
-  /** Key текущей записи стека: смена экрана = новый ключ. */
-  screenKey: string
-  onNavigate: (view: View) => void
-  unreadTotal: number
-  onToggleNotifications: () => void
-}) {
-  const items: MenuBarItem[] = NAV_ITEMS.map((item) => ({
-    ...item,
-    active: TOP_LEVEL[item.key] === view,
-    badge: item.key === 'chats' && unreadTotal > 0 ? unreadTotal : undefined,
-  }))
-
-  // Shrink the dock while scrolling down; it restores on scroll up.
-  //
-  // Инстанс теперь один, поэтому слушатель перепривязывается на смене экрана
-  // (`screenKey`): `lastY` заново считается от фактического скролла (иначе
-  // первое движение после возврата на длинную ленту ошибётся направлением),
-  // а `compact` сбрасывается синхронно — не в эффекте, чтобы док не мигал
-  // сжатой полосой на первом кадре нового экрана.
-  const [compact, setCompact] = useState(false)
-  const lastScreenKey = useRef(screenKey)
-  if (lastScreenKey.current !== screenKey) {
-    lastScreenKey.current = screenKey
-    setCompact(false)
-  }
-
-  useEffect(() => {
-    let lastY = window.scrollY
-    let ticking = false
-    function onScroll() {
-      if (ticking) return
-      ticking = true
-      requestAnimationFrame(() => {
-        const y = window.scrollY
-        const goingDown = y > lastY
-        if (goingDown && y > 80) setCompact(true)
-        else if (!goingDown) setCompact(false)
-        lastY = y
-        ticking = false
-      })
-    }
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [screenKey])
-
-  return (
-    <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2">
-      <MenuBar
-        items={items}
-        compact={compact}
-        onSelect={(key) => {
-          if (key === 'chats') onToggleNotifications()
-          else onNavigate(TOP_LEVEL[key])
-        }}
-      />
-    </div>
-  )
 }
 
 function AppContent() {
@@ -340,6 +225,8 @@ function AppContent() {
     push('thread', { chatId })
   }
 
+  // «Чаты» в шапке: переход + раскрытие панели уведомлений (так же вёл себя
+  // пункт дока). Без сессии — экран входа с подсказкой.
   function toggleNotifications() {
     if (!session) {
       setDirection('forward')
@@ -382,145 +269,136 @@ function AppContent() {
     </AppShell>
   )
 
-  // Единственный инстанс дока: рендерится ПОСЛЕ стека экранов и вне
-  // `PageTransition`. Условия те же, что были у семи блоков разметки:
-  // не экран входа, экран из DOCK_VIEWS, и для detail/thread — наличие
-  // своего параметра (без него страница не рендерилась, значит и дока нет).
-  const dockVisible =
-    !authActive &&
-    DOCK_VIEWS.includes(current.view) &&
-    (current.view !== 'detail' || Boolean(current.params.listingId)) &&
-    (current.view !== 'thread' || Boolean(current.params.chatId))
+  // Навигация шапки живёт в AppShell: здесь остаётся только сказать, какой
+  // экран текущий и чем на него переходить. Пункты, активный выделение и
+  // особая обработка «Чатов» — забота шапки (src/components/layout/AppShell.tsx).
+  // Юридические страницы и экран входа AppShell не оборачивают, поэтому
+  // навигации там нет по построению.
+  const shellNav: AppShellNavProps = {
+    view: current.view,
+    onNavigate: navigate,
+    onToggleNotifications: toggleNotifications,
+    unreadTotal: unread.total,
+  }
 
   return (
-    <>
-      <PageStack animated={!reducedMotion} direction={direction}>
-        {current.view === 'privacy' && (
-          <PageTransition key={current.key}>
-            <Suspense fallback={SuspenseFallback}>
-              <LegalScreen doc="privacy" onBack={goBack} />
-            </Suspense>
-          </PageTransition>
-        )}
+    <PageStack animated={!reducedMotion} direction={direction}>
+      {current.view === 'privacy' && (
+        <PageTransition key={current.key}>
+          <Suspense fallback={SuspenseFallback}>
+            <LegalScreen doc="privacy" onBack={goBack} />
+          </Suspense>
+        </PageTransition>
+      )}
 
-        {current.view === 'terms' && (
-          <PageTransition key={current.key}>
-            <Suspense fallback={SuspenseFallback}>
-              <LegalScreen doc="terms" onBack={goBack} />
-            </Suspense>
-          </PageTransition>
-        )}
+      {current.view === 'terms' && (
+        <PageTransition key={current.key}>
+          <Suspense fallback={SuspenseFallback}>
+            <LegalScreen doc="terms" onBack={goBack} />
+          </Suspense>
+        </PageTransition>
+      )}
 
-        {authActive && (
-          <PageTransition key={`auth:${current.key}`}>
-            <AuthScreen
-              hint={authIntent?.hint}
-              onBack={closeAuth}
-              onOpenLegal={(legalView) => navigate(legalView)}
-            />
-          </PageTransition>
-        )}
+      {authActive && (
+        <PageTransition key={`auth:${current.key}`}>
+          <AuthScreen
+            hint={authIntent?.hint}
+            onBack={closeAuth}
+            onOpenLegal={(legalView) => navigate(legalView)}
+          />
+        </PageTransition>
+      )}
 
-        {!authActive && current.view === 'new' && (
-          <PageTransition key={current.key}>
-            <Suspense fallback={SuspenseFallback}>
-              <AppShell>
-                <NewListing onSaved={() => navigate('mine')} onCancel={() => navigate('home')} />
-              </AppShell>
-            </Suspense>
-          </PageTransition>
-        )}
+      {!authActive && current.view === 'new' && (
+        <PageTransition key={current.key}>
+          <Suspense fallback={SuspenseFallback}>
+            <AppShell {...shellNav}>
+              <NewListing onSaved={() => navigate('mine')} onCancel={() => navigate('home')} />
+            </AppShell>
+          </Suspense>
+        </PageTransition>
+      )}
 
-        {!authActive && current.view === 'mine' && (
-          <PageTransition key={current.key}>
-            <Suspense fallback={SuspenseFallback}>
-              <AppShell>
-                <MyListingsScreen onBack={goBack} />
-              </AppShell>
-            </Suspense>
-          </PageTransition>
-        )}
+      {!authActive && current.view === 'mine' && (
+        <PageTransition key={current.key}>
+          <Suspense fallback={SuspenseFallback}>
+            <AppShell {...shellNav}>
+              <MyListingsScreen onBack={goBack} />
+            </AppShell>
+          </Suspense>
+        </PageTransition>
+      )}
 
-        {!authActive && current.view === 'detail' && current.params.listingId && (
-          <PageTransition key={current.key}>
-            <Suspense fallback={SuspenseFallback}>
-              <AppShell>
-                <ListingDetailScreen
-                  id={current.params.listingId}
-                  onBack={goBack}
-                  onStartChat={openChat}
-                  requireAuth={requestAuth}
-                  resumeStartChat={resumeChat}
-                />
-              </AppShell>
-            </Suspense>
-          </PageTransition>
-        )}
+      {!authActive && current.view === 'detail' && current.params.listingId && (
+        <PageTransition key={current.key}>
+          <Suspense fallback={SuspenseFallback}>
+            <AppShell {...shellNav}>
+              <ListingDetailScreen
+                id={current.params.listingId}
+                onBack={goBack}
+                onStartChat={openChat}
+                requireAuth={requestAuth}
+                resumeStartChat={resumeChat}
+              />
+            </AppShell>
+          </Suspense>
+        </PageTransition>
+      )}
 
-        {!authActive && current.view === 'chats' && (
-          <PageTransition key={current.key}>
-            <Suspense fallback={SuspenseFallback}>
-              <AppShell>
-                <ChatsScreen
-                  onBack={goBack}
-                  unread={unread}
-                  onOpenChat={openChat}
-                  showNotifications={showNotifications}
-                  onCloseNotifications={() => setShowNotifications(false)}
-                />
-              </AppShell>
-            </Suspense>
-          </PageTransition>
-        )}
-        {!authActive && current.view === 'thread' && current.params.chatId && (
-          <PageTransition key={current.key}>
-            <Suspense fallback={SuspenseFallback}>
-              <AppShell>
-                <ThreadScreen chatId={current.params.chatId} onBack={goBack} />
-              </AppShell>
-            </Suspense>
-          </PageTransition>
-        )}
-
-        {!authActive && current.view === 'profile' && (
-          <PageTransition key={current.key}>
-            <Suspense fallback={SuspenseFallback}>
-              <AppShell>
-                <ProfileScreenWrapper onBack={goBack} />
-              </AppShell>
-            </Suspense>
-          </PageTransition>
-        )}
-
-        {!authActive && current.view === 'home' && (
-          <PageTransition key={current.key}>
-            <AppShell>
-              <HomeFeed
-                onOpen={openDetail}
-                onCreate={() => navigate('new')}
-                isAuthenticated={Boolean(user)}
-                userEmailConfirmed={Boolean(user?.email_confirmed_at)}
-                isSupabaseConfigured={isSupabaseConfigured()}
-                showNotifications={showNotifications}
+      {!authActive && current.view === 'chats' && (
+        <PageTransition key={current.key}>
+          <Suspense fallback={SuspenseFallback}>
+            <AppShell {...shellNav}>
+              <ChatsScreen
+                onBack={goBack}
                 unread={unread}
                 onOpenChat={openChat}
+                showNotifications={showNotifications}
                 onCloseNotifications={() => setShowNotifications(false)}
               />
             </AppShell>
-          </PageTransition>
-        )}
-      </PageStack>
-
-      {dockVisible && (
-        <MenuNav
-          view={current.view}
-          screenKey={current.key}
-          onNavigate={navigate}
-          unreadTotal={unread.total}
-          onToggleNotifications={toggleNotifications}
-        />
+          </Suspense>
+        </PageTransition>
       )}
-    </>
+
+      {!authActive && current.view === 'thread' && current.params.chatId && (
+        <PageTransition key={current.key}>
+          <Suspense fallback={SuspenseFallback}>
+            <AppShell {...shellNav}>
+              <ThreadScreen chatId={current.params.chatId} onBack={goBack} />
+            </AppShell>
+          </Suspense>
+        </PageTransition>
+      )}
+
+      {!authActive && current.view === 'profile' && (
+        <PageTransition key={current.key}>
+          <Suspense fallback={SuspenseFallback}>
+            <AppShell {...shellNav}>
+              <ProfileScreenWrapper onBack={goBack} />
+            </AppShell>
+          </Suspense>
+        </PageTransition>
+      )}
+
+      {!authActive && current.view === 'home' && (
+        <PageTransition key={current.key}>
+          <AppShell {...shellNav}>
+            <HomeFeed
+              onOpen={openDetail}
+              onCreate={() => navigate('new')}
+              isAuthenticated={Boolean(user)}
+              userEmailConfirmed={Boolean(user?.email_confirmed_at)}
+              isSupabaseConfigured={isSupabaseConfigured()}
+              showNotifications={showNotifications}
+              unread={unread}
+              onOpenChat={openChat}
+              onCloseNotifications={() => setShowNotifications(false)}
+            />
+          </AppShell>
+        </PageTransition>
+      )}
+    </PageStack>
   )
 }
 
@@ -546,7 +424,6 @@ export function App() {
   return (
     <AuthProvider>
       <NavigationProvider>
-        <CustomCursor />
         <AppContent />
       </NavigationProvider>
     </AuthProvider>

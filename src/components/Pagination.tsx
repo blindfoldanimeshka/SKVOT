@@ -75,7 +75,6 @@ export function Pagination({
   return (
     <nav
       aria-label="Пагинация"
-      data-cursor-ignore
       className="flex flex-wrap items-center justify-center gap-2"
     >
       {total !== undefined && (

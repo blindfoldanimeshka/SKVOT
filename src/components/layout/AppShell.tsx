@@ -2,6 +2,11 @@ import type { ReactNode } from 'react'
 import { useScroll, useSpring, useReducedMotion, useTransform, motion } from 'motion/react'
 import logoSvg from '@/public/СКВОТ.svg'
 import { NotificationBell } from '@/features/notifications/NotificationBell'
+import { SearchIcon } from '@/components/icons/search'
+import { PlusIcon } from '@/components/icons/plus'
+import { HomeIcon } from '@/components/icons/home'
+import { MessageSquareIcon } from '@/components/icons/message-square'
+import { UserIcon } from '@/components/icons/user'
 import { cn } from '@/lib/utils'
 import type { View } from '@/app/navigation/types'
 
@@ -9,12 +14,12 @@ import type { View } from '@/app/navigation/types'
  * Пункты шапки. Подписи — договор с e2e-тестами: менять нельзя, можно только
  * добавлять (регистр и пробелы тоже значимы: `getByRole` сверяет имя целиком).
  */
-const NAV_ITEMS: ReadonlyArray<{ view: View; label: string }> = [
-  { view: 'home', label: 'Поиск' },
-  { view: 'new', label: 'Новое' },
-  { view: 'mine', label: 'Мои' },
-  { view: 'chats', label: 'Чаты' },
-  { view: 'profile', label: 'Профиль' },
+const NAV_ITEMS: ReadonlyArray<{ view: View; label: string; icon: typeof SearchIcon }> = [
+  { view: 'home', label: 'Поиск', icon: SearchIcon },
+  { view: 'new', label: 'Новое', icon: PlusIcon },
+  { view: 'mine', label: 'Мои', icon: HomeIcon },
+  { view: 'chats', label: 'Чаты', icon: MessageSquareIcon },
+  { view: 'profile', label: 'Профиль', icon: UserIcon },
 ]
 
 /**
@@ -96,15 +101,17 @@ function HeaderNav({ className, view, onNavigate, onToggleNotifications }: Heade
               <button
                 type="button"
                 aria-current={isActive ? 'page' : undefined}
+                aria-label={item.label}
                 onClick={() => select(item.view)}
                 className={cn(
-                  'relative shrink-0 whitespace-nowrap rounded-t-md px-2 py-2 font-medium',
+                  'relative flex shrink-0 flex-col items-center gap-0.5 whitespace-nowrap rounded-t-md px-2 py-1.5 font-medium',
                   'transition-colors duration-[var(--duration-fast)] ease-[var(--ease-smooth)]',
-                  'sm:px-3',
+                  'sm:flex-row sm:gap-1.5 sm:px-3 sm:py-2',
                   isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
                 )}
               >
-                {item.label}
+                <item.icon size={18} className="shrink-0" />
+                <span>{item.label}</span>
                 {/* Подчёркивание активного пункта: lime-акцент бренда, а не
                     дефолтная «пилюля из SaaS-шаблона». */}
                 {isActive && (

@@ -135,9 +135,9 @@ export function Feed({
     const map: Record<string, string[]> = {}
     const realIds: string[] = []
 
-    listings.forEach((listing, index) => {
+    listings.forEach((listing) => {
       if (listing.is_mock) {
-        map[listing.id] = getMockPhotoUrls(index)
+        map[listing.id] = getMockPhotoUrls(listing.id, listing.type)
       } else {
         realIds.push(listing.id)
       }

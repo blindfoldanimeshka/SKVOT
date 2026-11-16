@@ -74,7 +74,7 @@ export function ListingDetail({
     let cancelled = false
 
     if (listing?.is_mock) {
-      setPhotos(getMockPhotoUrls(0))
+      setPhotos(getMockPhotoUrls(listing.id, listing.type))
       return
     }
 

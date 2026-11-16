@@ -1,5 +1,8 @@
-import { useState, useCallback, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { motion } from 'motion/react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { preloadNext, usePrefersReducedMotion } from '@/features/photos/media'
+import { useCarouselDrag } from './useCarouselDrag'
 
 interface ListingCardCarouselProps {
   urls: string[]
@@ -8,49 +11,44 @@ interface ListingCardCarouselProps {
 
 export function ListingCardCarousel({ urls, alt }: ListingCardCarouselProps) {
   const [index, setIndex] = useState(0)
-  const touchStart = useRef<number | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const count = urls.length
+  // Карусель в ленте без автослайда, но snap-пружинку свайпа тоже глушим при
+  // prefers-reduced-motion — это делает хук по флагу ниже.
+  const reducedMotion = usePrefersReducedMotion()
+  const { x, handlers } = useCarouselDrag({
+    count,
+    index,
+    onIndexChange: setIndex,
+    reducedMotion,
+    containerRef: rootRef,
+  })
 
-  const prev = useCallback(() => {
-    setIndex((i) => (i === 0 ? count - 1 : i - 1))
-  }, [count])
+  const prev = () => setIndex((i) => (i === 0 ? count - 1 : i - 1))
+  const next = () => setIndex((i) => (i === count - 1 ? 0 : i + 1))
 
-  const next = useCallback(() => {
-    setIndex((i) => (i === count - 1 ? 0 : i + 1))
-  }, [count])
-
-  function handleTouchStart(e: React.TouchEvent) {
-    touchStart.current = e.touches[0].clientX
-  }
-
-  function handleTouchEnd(e: React.TouchEvent) {
-    if (touchStart.current === null) return
-    const diff = touchStart.current - e.changedTouches[0].clientX
-    if (Math.abs(diff) > 40) {
-      if (diff > 0) {
-        next()
-      } else {
-        prev()
-      }
-    }
-    touchStart.current = null
-  }
+  // Предзагрузка следующего кадра: в ленте карточек много, следующий кадр
+  // догружаем заранее — переключение по свайпу будет без вспышки.
+  useEffect(() => {
+    preloadNext(urls, index)
+  }, [urls, index])
 
   if (count === 0) return null
 
   return (
     <div
+      ref={rootRef}
       className="group/carousel relative aspect-[4/3] w-full overflow-hidden"
       role="group"
       aria-roledescription="carousel"
       aria-label="Фото объявления"
     >
-      {/* Track */}
-      <div
-        className="flex h-full transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
-        style={{ transform: `translateX(-${index * 100}%)` }}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
+      {/* Track: инерционный свайп через Pointer Events + snap пружиной. */}
+      <motion.div
+        data-testid="carousel-track"
+        className="flex h-full"
+        style={{ x, touchAction: 'pan-y' }}
+        {...handlers}
       >
         {urls.map((url, i) => (
           <div
@@ -63,16 +61,17 @@ export function ListingCardCarousel({ urls, alt }: ListingCardCarouselProps) {
               alt={i === index ? alt : ''}
               loading={i === index ? 'eager' : 'lazy'}
               decoding="async"
-              className="h-full w-full object-cover"
+              draggable={false}
+              className="h-full w-full select-none object-cover"
             />
           </div>
         ))}
-      </div>
+      </motion.div>
 
       {/* Gradient overlay — bottom third */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/40 to-transparent" />
 
-      {/* Arrows — visible on hover (desktop) / always on touch.
+      {/* Arrows — на десктопе по hover, на мобильном скрыты: там свайп.
 
           z-30: карточка (ListingCard) накрывает себя кнопкой-оверлеем «Открыть
           объявление» со z-20. Контролы карусели обязаны лежать выше, иначе клик
@@ -81,17 +80,17 @@ export function ListingCardCarousel({ urls, alt }: ListingCardCarouselProps) {
           что всплытия к нему нет, но он страхует любых кликабельных предков.
 
           group-hover (без слэша) — это :hover по карточке целиком: кнопка-оверлей
-          лежит выше фото, поэтому на group/carousel наведение мышью в области
-          фото приходило бы только тогда, когда курсор уже попал в саму стрелку,
-          и стрелки никогда бы не показывались. group-hover/carousel оставляем —
-          он работает, когда карусель рендерят без карточного оверлея. */}
+          лежит выше фото, поэтому наведение мышью в области фото приходило бы
+          только тогда, когда курсор уже попал в саму стрелку, и стрелки никогда
+          бы не показывались. group-hover/carousel оставляем — он работает, когда
+          карусель рендерят без карточного оверлея. */}
       {count > 1 && (
         <>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); e.preventDefault(); prev() }}
             aria-label="Предыдущее фото"
-            className="absolute left-2 top-1/2 z-30 -translate-y-1/2 cursor-pointer rounded-full bg-black/40 p-1.5 text-white opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-black/60 group-hover:opacity-100 group-hover/carousel:opacity-100 max-sm:opacity-100"
+            className="absolute left-2 top-1/2 z-30 -translate-y-1/2 cursor-pointer rounded-full bg-black/40 p-1.5 text-white opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-black/60 group-hover:opacity-100 group-hover/carousel:opacity-100 max-sm:hidden"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -99,7 +98,7 @@ export function ListingCardCarousel({ urls, alt }: ListingCardCarouselProps) {
             type="button"
             onClick={(e) => { e.stopPropagation(); e.preventDefault(); next() }}
             aria-label="Следующее фото"
-            className="absolute right-2 top-1/2 z-30 -translate-y-1/2 cursor-pointer rounded-full bg-black/40 p-1.5 text-white opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-black/60 group-hover:opacity-100 group-hover/carousel:opacity-100 max-sm:opacity-100"
+            className="absolute right-2 top-1/2 z-30 -translate-y-1/2 cursor-pointer rounded-full bg-black/40 p-1.5 text-white opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-black/60 group-hover:opacity-100 group-hover/carousel:opacity-100 max-sm:hidden"
           >
             <ChevronRight className="h-4 w-4" />
           </button>

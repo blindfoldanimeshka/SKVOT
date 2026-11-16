@@ -1,5 +1,8 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { motion } from 'motion/react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { preloadNext, useInView, usePrefersReducedMotion } from '@/features/photos/media'
+import { useCarouselDrag } from './useCarouselDrag'
 
 interface PhotoCarouselProps {
   urls: string[]
@@ -10,47 +13,54 @@ interface PhotoCarouselProps {
 
 export function PhotoCarousel({ urls, alt, onImageClick, className = '' }: PhotoCarouselProps) {
   const [index, setIndex] = useState(0)
-  const touchStart = useRef<number | null>(null)
-  const isHovered = useRef(false)
+  const [hovered, setHovered] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
   const count = urls.length
+  const reducedMotion = usePrefersReducedMotion()
+  const inView = useInView(rootRef)
+  const { x, dragging, moved, handlers } = useCarouselDrag({
+    count,
+    index,
+    onIndexChange: setIndex,
+    reducedMotion,
+    containerRef: rootRef,
+  })
 
-  const prev = useCallback(() => {
+  // Стрелки и автопрокрутка листаются по кругу — поведение исходное.
+  function prev() {
     setIndex((i) => (i === 0 ? count - 1 : i - 1))
-  }, [count])
+  }
 
-  const next = useCallback(() => {
+  function next() {
     setIndex((i) => (i === count - 1 ? 0 : i + 1))
-  }, [count])
+  }
 
-  // Auto-slide every 6 seconds
+  // Автослайд каждые 6 с: пауза при ховере и свайпе, остановка вне вьюпорта,
+  // полное отключение при prefers-reduced-motion.
   useEffect(() => {
-    if (count <= 1) return
+    if (count <= 1 || reducedMotion || !inView) return
     const timer = setInterval(() => {
-      if (!isHovered.current) {
-        next()
-      }
+      if (hovered || dragging.current) return
+      setIndex((i) => (i === count - 1 ? 0 : i + 1))
     }, 6000)
     return () => clearInterval(timer)
-  }, [count, next])
+  }, [count, reducedMotion, inView, hovered, dragging])
 
-  function handleTouchStart(e: React.TouchEvent) {
-    touchStart.current = e.touches[0].clientX
-  }
+  // Предзагрузка следующего кадра: переключение без белой вспышки.
+  useEffect(() => {
+    preloadNext(urls, index)
+  }, [urls, index])
 
-  function handleTouchEnd(e: React.TouchEvent) {
-    if (touchStart.current === null) return
-    const diff = touchStart.current - e.changedTouches[0].clientX
-    if (Math.abs(diff) > 40) {
-      if (diff > 0) {
-        next()
-      } else {
-        prev()
-      }
-    }
-    touchStart.current = null
-  }
-
-  function handleImageClick() {
+  // Клик живёт на ДОРОЖКЕ, а не на <img>: pointerdown вызывает
+  // setPointerCapture на дорожке, и реальный браузер ретаргетит последующий
+  // click на захвативший элемент — на img он бы уже не пришёл (jsdom capture
+  // не реализует, поэтому тесты с onClick на img проходили, а в браузере клик
+  // терялся). На дорожке обработчику безразлично, кто был целью: событие всё
+  // равно приземляется на неё. Клик с img (без capture-ретаргета) сюда тоже
+  // доходит через всплытие.
+  function handleTrackClick() {
+    // Клик после свайпа — не выбор фото.
+    if (moved.current) return
     if (onImageClick) {
       onImageClick(index)
     }
@@ -60,19 +70,23 @@ export function PhotoCarousel({ urls, alt, onImageClick, className = '' }: Photo
 
   return (
     <div
+      ref={rootRef}
       className={`group/carousel relative w-full overflow-hidden ${className}`}
       role="group"
       aria-roledescription="carousel"
       aria-label="Фото объявления"
-      onMouseEnter={() => { isHovered.current = true }}
-      onMouseLeave={() => { isHovered.current = false }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
-      {/* Track */}
-      <div
-        className="flex h-full transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
-        style={{ transform: `translateX(-${index * 100}%)` }}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
+      {/* Track: motion-dx через Pointer Events, snap пружиной (useCarouselDrag).
+          touch-action: pan-y — вертикаль остаётся браузеру (скролл страницы).
+          onClick здесь же (см. handleTrackClick) — устойчиво к pointer capture. */}
+      <motion.div
+        data-testid="carousel-track"
+        className={`flex h-full ${onImageClick ? 'cursor-pointer' : ''}`}
+        style={{ x, touchAction: 'pan-y' }}
+        {...handlers}
+        onClick={handleTrackClick}
       >
         {urls.map((url, i) => (
           <div
@@ -85,24 +99,24 @@ export function PhotoCarousel({ urls, alt, onImageClick, className = '' }: Photo
               alt={i === index ? alt : ''}
               loading={i === index ? 'eager' : 'lazy'}
               decoding="async"
-              className={`h-full w-full object-cover ${onImageClick ? 'cursor-pointer' : ''}`}
-              onClick={handleImageClick}
+              draggable={false}
+              className="h-full w-full select-none object-cover"
             />
           </div>
         ))}
-      </div>
+      </motion.div>
 
       {/* Gradient overlay — bottom half, stronger for text readability */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/60 via-black/30 to-transparent" />
 
-      {/* Arrows — visible on hover (desktop) / always on touch */}
+      {/* Arrows — на десктопе по hover, на мобильном скрыты: там свайп. */}
       {count > 1 && (
         <>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); e.preventDefault(); prev() }}
             aria-label="Предыдущее фото"
-            className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/40 p-2 text-white opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-black/60 group-hover/carousel:opacity-100 max-sm:opacity-100"
+            className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/40 p-2 text-white opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-black/60 group-hover/carousel:opacity-100 max-sm:hidden"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
@@ -110,7 +124,7 @@ export function PhotoCarousel({ urls, alt, onImageClick, className = '' }: Photo
             type="button"
             onClick={(e) => { e.stopPropagation(); e.preventDefault(); next() }}
             aria-label="Следующее фото"
-            className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/40 p-2 text-white opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-black/60 group-hover/carousel:opacity-100 max-sm:opacity-100"
+            className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/40 p-2 text-white opacity-0 backdrop-blur-sm transition-all duration-200 hover:bg-black/60 group-hover/carousel:opacity-100 max-sm:hidden"
           >
             <ChevronRight className="h-5 w-5" />
           </button>

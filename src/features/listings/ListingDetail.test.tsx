@@ -190,16 +190,32 @@ describe('ListingDetail hero — фото ограничено, плашка п�
     expect(plate).toContainElement(screen.getByRole('heading', { level: 1, name: 'Москва' }))
   })
 
-  it('бейдж мока читается «Демо» (кириллица), цена лежит на плашке под фото', async () => {
+  it('на плашке только город и бейджи; цена — ровно один раз в документе (зелёная плитка)', async () => {
     renderDetail()
 
     const carousel = await screen.findByRole('group', { name: 'Фото объявления' })
     const plate = carousel.parentElement!.lastElementChild as HTMLElement
 
+    // Бейджи читаются кириллицей (не «MOCK»).
+    expect(plate).toHaveTextContent('Сдаётся')
     expect(plate).toHaveTextContent('Демо')
     expect(screen.queryByText('MOCK')).not.toBeInTheDocument()
-    // Цена читаема на плашке (тот же формат, что и в бенто-плитке ниже).
-    expect(plate).toHaveTextContent('50 000')
-    expect(plate).toHaveTextContent('Москва')
+
+    // Город остаётся на плашке — единственный заголовок там же.
+    expect(plate).toContainElement(screen.getByRole('heading', { level: 1, name: 'Москва' }))
+
+    // Цена с плашки убрана: ни суммы, ни суффикса «₽/мес.», ни вообще <p> —
+    // на чёрной плашке теперь только бейджи (span) и город (h1).
+    expect(plate).not.toHaveTextContent('50 000')
+    expect(plate).not.toHaveTextContent('₽/мес.')
+    expect(plate.querySelectorAll('p')).toHaveLength(0)
+
+    // Цена встречается в документе ровно один раз — в бенто-плитке «Цена»:
+    // getAllByText берёт прямой текст узлов, матчится только <p> плитки.
+    const priceNodes = screen.getAllByText(/50 000/)
+    expect(priceNodes).toHaveLength(1)
+    expect(priceNodes[0]).toHaveTextContent('₽/мес.')
+    // Этот единственный узел — не на плашке (плитка лежит в bento-grid ниже).
+    expect(plate).not.toContainElement(priceNodes[0])
   })
 })

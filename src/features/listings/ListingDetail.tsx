@@ -163,7 +163,7 @@ export function ListingDetail({
         <>
           {/* Hero: фото ограничено по высоте (35vh на десктопе, 35vh на мобильном;
               было 45/40vh — из-за этого «Адрес» уезжал под док на 1280×900),
-              плашка с бейджами/городом/ценой — ПОД фото, в обычном потоке. Раньше она
+              плашка с бейджами/городом — ПОД фото, в обычном потоке. Раньше она
               лежала absolutely поверх снимка на всю его глубину (~600px при aspect 16/9
               на 1024px), из-за чего суть уезжала под сгиб. */}
           <div className="overflow-hidden rounded-3xl bg-card shadow-[var(--shadow-raised)]">
@@ -177,8 +177,10 @@ export function ListingDetail({
                 />
 
                 {/* Плашка — footer карточки под фото: сплошной чёрный фон, белый текст —
-                    контраст city/price без полупрозрачных наслоений поверх снимка */}
-                <div className="bg-black px-4 py-4 sm:px-5 sm:py-3">
+                    контраст city/badges без полупрозрачных наслоений поверх снимка.
+                    Цены здесь больше нет: она показана ровно один раз — в зелёной
+                    бенто-плитке «Цена» ниже (решение владельца). */}
+                <div className="bg-black px-4 py-3 sm:px-5 sm:py-2.5">
                   {/* Badges row */}
                   <div className="flex flex-wrap items-center gap-2">
                     <span
@@ -202,16 +204,12 @@ export function ListingDetail({
                     )}
                   </div>
 
-                  {/* City + price: baseline-строка, бейжи выше — не наезжают на текст */}
-                  <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 sm:mt-3">
-                    <h1 className="font-display text-2xl font-bold tracking-tight text-white sm:text-3xl">
-                      {listing.city}
-                    </h1>
-                    <p className="font-display text-xl font-bold text-white sm:text-2xl">
-                      {formatPrice(listing.price)}{' '}
-                      <span className="text-sm font-medium text-white/70">₽/мес.</span>
-                    </p>
-                  </div>
+                  {/* Город — основная строка плашки. Раньше это была baseline-строка
+                      «city + price» с justify-between; цена уехала в плитку, поэтому
+                      h1 теперь обычный блок: не растягивается и не «висит» в пустоте */}
+                  <h1 className="mt-2 font-display text-2xl font-bold tracking-tight text-white sm:mt-2.5 sm:text-3xl">
+                    {listing.city}
+                  </h1>
                 </div>
               </>
             ) : (

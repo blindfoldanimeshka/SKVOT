@@ -104,6 +104,14 @@ body {
   min-width: 320px;
 }
 
+/* Направленный сдвиг страниц (src/app/App.tsx): въезжающий экран на время
+   перехода смещён на 16px — этот transform родил бы горизонтальную прокрутку.
+   clip, а не hidden: не создаёт scroll-контейнер и потому не ломает
+   position: sticky у шапки. */
+html {
+  overflow-x: clip;
+}
+
 button,
 input,
 textarea,
@@ -210,5 +218,30 @@ h1, h2, h3 {
   line-height: 1;
   text-transform: uppercase;
   letter-spacing: 0.12em;
+}
+
+/* Точка-индикатор активного пункта (мобильный): мягкое свечение. Тень живёт на
+   элементе, поэтому гаснет вместе с opacity при уходе индикатора. */
+.dock-dot {
+  box-shadow: 0 0 8px 1px rgba(125, 57, 235, 0.7);
+}
+
+/* Микродвижения дока (нажатие, pop иконки, bounce скобы, уклон «губок», бейдж,
+   точка) задаются пружинами в src/components/layout/MenuBar.tsx, их цели —
+   inline-стили от motion. Здесь — страховка prefers-reduced-motion: transform
+   перечисленных слоёв целиком декоративный, при reduce его быть не должно.
+   Скобы ([data-dock-bracket]) в списке нет намеренно: через x/width она ЕДЕТ,
+   это позиционирование активного пункта, а не украшение. */
+@media (prefers-reduced-motion: reduce) {
+  [data-dock-icon],
+  [data-dock-press],
+  [data-dock-pop],
+  [data-dock-label],
+  [data-dock-badge],
+  [data-dock-dot],
+  [data-dock-bracket-frame],
+  [data-dock-lip] {
+    transform: none !important;
+  }
 }
 

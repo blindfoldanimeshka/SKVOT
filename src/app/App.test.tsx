@@ -1,5 +1,5 @@
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 const mockSession = {
   user: { id: 'u1', email: 'test@example.com', email_confirmed_at: 'now' },
@@ -152,5 +152,138 @@ describe('App', () => {
     expect(
       screen.queryByRole('heading', { name: 'Вход' }),
     ).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Док поднят над стеком экранов (`MenuNav` — сиблинг `PageStack`), иначе
+ * навигация перемонтировала полосу и «переезд» скобы, pop и bounce не могли
+ * сыграть: новому экземпляру не откуда ехать.
+ */
+describe('App: док над стеком экранов', () => {
+  // Как и в describe выше: каждый тест получает приложение с новым моком
+  // supabase, иначе `await import('@/app/App')` вернёт модуль с чужой сессией.
+  beforeEach(() => {
+    vi.resetModules()
+    authStateCb = null
+  })
+
+  const dockBar = () => document.querySelector('.dock-bar') as HTMLElement
+  const bracket = () => document.querySelector('[data-dock-bracket]') as HTMLElement | null
+
+  /**
+   * jsdom не раскладывает boxes: `offsetLeft`/`offsetWidth` всегда 0, а по ним
+   * MenuBar измеряет скобу. Подсовываем геометрию ряда, чтобы переезд стало
+   * чем измерять.
+   */
+  function stubDockGeometry(): void {
+    const buttons = [...document.querySelectorAll<HTMLElement>('.dock-bar button')]
+    expect(buttons).toHaveLength(5)
+    buttons.forEach((el, i) => {
+      Object.defineProperty(el, 'offsetLeft', { value: i * 70, configurable: true })
+      Object.defineProperty(el, 'offsetWidth', { value: 64, configurable: true })
+    })
+  }
+
+  function setScrollY(y: number): void {
+    Object.defineProperty(window, 'scrollY', {
+      value: y,
+      writable: true,
+      configurable: true,
+    })
+  }
+
+  afterEach(() => {
+    setScrollY(0)
+  })
+
+  it('не перемонтируется при смене раздела и скоба реально едет (тот же узел)', async () => {
+    await renderApp(mockSession)
+    await screen.findByRole('heading', { name: 'Объявления' })
+
+    const node = bracket()
+    expect(node).not.toBeNull()
+    // Один инстанс дока на приложение.
+    expect(document.querySelectorAll('[data-dock-bracket]')).toHaveLength(1)
+
+    stubDockGeometry()
+    // Resize — единственный способ заставить док перечитать подставленную
+    // геометрию без перерисовки: measure() висит на window「resize」.
+    act(() => window.dispatchEvent(new Event('resize')))
+    await waitFor(() => expect(node!.style.width).toBe('64px'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Мои' }))
+    await screen.findByRole('heading', { name: 'Мои объявления' })
+
+    // Экран сменился (mode="wait" доиграл exit → enter), а док — тот же узел.
+    expect(bracket()).toBe(node)
+    expect(document.querySelectorAll('[data-dock-bracket]')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Мои' })).toHaveAttribute('aria-current', 'page')
+
+    // Слой: док — ПОСЛЕДНИЙ сиблинг после стека экранов и positioned z-40,
+    // тогда как обёртки страниц не позиционированы (их transform при
+    // переходе рисует layer с z-index auto) — значит док поверх экрана.
+    const wrapper = node!.closest('.fixed') as HTMLElement
+    expect(wrapper.className).toContain('z-40')
+    expect(wrapper.parentElement?.lastElementChild).toBe(wrapper)
+
+    // «Мои» — третий пункт: 2 × 70 = 140px. Пружина доезжает до цели.
+    await waitFor(() => expect(node!.style.transform).toBe('translateX(140px)'))
+  })
+
+  it('compact дока не переезжает вместе с новым экраном', async () => {
+    setScrollY(0)
+    await renderApp(mockSession)
+    await screen.findByRole('heading', { name: 'Объявления' })
+
+    // Прокрутили ленту вниз — полоса сжалась.
+    act(() => setScrollY(400))
+    act(() => window.dispatchEvent(new Event('scroll')))
+    await waitFor(() => expect(dockBar().className).toContain('dock-h-compact'))
+
+    // Новый экран: док разжат, иначе он приезжал бы сжатой полосой.
+    act(() => setScrollY(0))
+    fireEvent.click(screen.getByRole('button', { name: 'Мои' }))
+    await screen.findByRole('heading', { name: 'Мои объявления' })
+    expect(dockBar().className).not.toContain('compact')
+    expect(dockBar().className).toContain('h-[var(--dock-h)]')
+  })
+
+  it('дока нет на экране входа и на юридических страницах — и он возвращается в ленту', async () => {
+    await renderApp(null)
+    await screen.findByRole('heading', { name: 'Объявления' })
+    expect(bracket()).not.toBeNull()
+
+    // Аноним жмёт «Новое» → экран входа: дока нет.
+    fireEvent.click(screen.getByRole('button', { name: 'Новое' }))
+    await screen.findByRole('heading', { name: 'Вход' })
+    expect(bracket()).toBeNull()
+
+    // «Политика конфиденциальности» с экрана входа → legal-страница: тоже нет.
+    fireEvent.click(screen.getByRole('button', { name: 'Политика конфиденциальности' }))
+    await screen.findByRole('heading', { name: 'Политика конфиденциальности' })
+    expect(bracket()).toBeNull()
+
+    // «← Назад» с legal-страницы — возврат на экран входа, а не в ленту.
+    fireEvent.click(screen.getByRole('button', { name: '← Назад' }))
+    await screen.findByRole('heading', { name: 'Вход' })
+    expect(bracket()).toBeNull()
+
+    // Отмена входа → лента → док на месте.
+    fireEvent.click(screen.getByRole('button', { name: '← Назад' }))
+    await screen.findByRole('heading', { name: 'Объявления' })
+    expect(bracket()).not.toBeNull()
+  })
+
+  it('дока нет на «Условиях»', async () => {
+    await renderApp(null)
+    await screen.findByRole('heading', { name: 'Объявления' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Новое' }))
+    await screen.findByRole('heading', { name: 'Вход' })
+    fireEvent.click(screen.getByRole('button', { name: 'Условия' }))
+    await screen.findByRole('heading', { name: 'Условия использования' })
+
+    expect(bracket()).toBeNull()
   })
 })

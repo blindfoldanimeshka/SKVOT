@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, Suspense, lazy } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, Suspense, lazy } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { SearchIcon } from '@/components/icons/search'
 import { PlusIcon } from '@/components/icons/plus'
@@ -30,26 +30,54 @@ const LegalScreen = lazy(() => import('@/app/screens/LegalScreen').then((m) => (
 // Eager-loaded landing screen
 import { HomeFeed } from '@/app/screens/HomeFeed'
 
-// Fade-only page transition.
-// `scale` is deliberately gone: scaling the whole page subtree (it holds
-// backdrop-blur chips and layered shadows) makes the compositor re-raster those
-// layers every frame — the single most expensive thing on a low-end GPU.
-// `mode="wait"` below runs exit → enter sequentially, so durations are kept
-// small: 0.1s out + 0.16s in ≈ 0.26s total swap (was 0.25 + 0.25 = 0.5s).
+// Переход между экранами: направленный сдвиг + fade вместо чистого fade.
+// `scale` здесь нет намеренно: масштабирование всего поддерева страницы
+// (backdrop-blur чипы, многослойные тени) заставляет композитор растеризовать
+// слои каждый кадр — дороже всего на слабом GPU. `x` — transform, он дёшев.
+// `mode="wait"` ниже проигрывает exit → enter последовательно:
+// 0.1s уход + 0.16s приход ≈ 0.26s на смену (в пределах бюджета 300 мс).
+const PAGE_SHIFT = 16
+
+/** `forward` — push: новый экран въезжает справа; `back` — наоборот, слева. */
+type PageDirection = 'forward' | 'back'
+
 const pageVariants = {
-  initial: { opacity: 0 },
-  animate: { opacity: 1, transition: { duration: 0.16, ease: 'easeOut' as const } },
-  exit: { opacity: 0, transition: { duration: 0.1, ease: 'easeIn' as const } },
+  initial: (direction: PageDirection) => ({
+    opacity: 0,
+    x: direction === 'back' ? -PAGE_SHIFT : PAGE_SHIFT,
+  }),
+  animate: {
+    opacity: 1,
+    x: 0,
+    transition: { duration: 0.16, ease: 'easeOut' as const },
+  },
+  exit: (direction: PageDirection) => ({
+    opacity: 0,
+    x: direction === 'back' ? PAGE_SHIFT : -PAGE_SHIFT,
+    transition: { duration: 0.1, ease: 'easeIn' as const },
+  }),
 }
+
+// Направление нужно каждому <PageTransition>, а пробрасывать его через все
+// блоки разметки — шум: передаём рядом с AnimatePresence (единственный
+// владелец перехода) и читаем контекстом.
+const PageDirectionContext = createContext<PageDirection>('forward')
 
 function PageTransition({ children }: { children: React.ReactNode }) {
   const reducedMotion = useReducedMotion()
+  const direction = useContext(PageDirectionContext)
   // With reduced motion there is no motion component at all, so nothing keeps
-  // the old page mounted (see PageStack below).
+  // the old page mounted (see PageStack below) — экран меняется мгновенно.
   if (reducedMotion) return <>{children}</>
 
   return (
-    <motion.div variants={pageVariants} initial="initial" animate="animate" exit="exit">
+    <motion.div
+      variants={pageVariants}
+      custom={direction}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+    >
       {children}
     </motion.div>
   )
@@ -60,9 +88,26 @@ function PageTransition({ children }: { children: React.ReactNode }) {
 // `children` must stay a *flat JSX list* of keyed <PageTransition> elements —
 // wrapping them in a fragment would hide the keys from AnimatePresence and
 // silently kill exit animations.
-function PageStack({ animated, children }: { animated: boolean; children: React.ReactNode }) {
-  if (!animated) return <>{children}</>
-  return <AnimatePresence mode="wait">{children}</AnimatePresence>
+function PageStack({
+  animated,
+  direction,
+  children,
+}: {
+  animated: boolean
+  direction: PageDirection
+  children: React.ReactNode
+}) {
+  return (
+    <PageDirectionContext.Provider value={direction}>
+      {animated ? (
+        <AnimatePresence mode="wait" custom={direction}>
+          {children}
+        </AnimatePresence>
+      ) : (
+        children
+      )}
+    </PageDirectionContext.Provider>
+  )
 }
 
 type ListingRow = Database['public']['Tables']['listings']['Row']
@@ -107,33 +152,62 @@ const AUTH_VIEW_HINTS: Partial<Record<View, string>> = {
   profile: 'Войдите, чтобы открыть профиль',
 }
 
+// Раздел дока, которому принадлежит экран. `detail`/`thread` здесь нет: это
+// вложенные экраны, ни одна кнопка не активна (скоба прячется) — как и раньше.
+const TOP_LEVEL: Record<string, View> = {
+  home: 'home',
+  new: 'new',
+  mine: 'mine',
+  chats: 'chats',
+  profile: 'profile',
+}
+
+// Экраны, на которых док живёт. Юридические страницы (`privacy`/`terms`) и
+// экран входа (`authActive`) дока не имеют — условия ниже повторяют блоки
+// разметки 1:1, включая «detail/thread нужен свой params».
+const DOCK_VIEWS: readonly View[] = ['home', 'new', 'mine', 'detail', 'chats', 'thread', 'profile']
+
+/**
+ * Единственный инстанс дока на всё приложение. Раньше его рендерили семь
+ * блоков страниц внутри `<PageTransition>` — из-за навигации док монтировался
+ * заново, и «переезд» скобы, pop иконки и bounce скобы не успевали сыграть:
+ * новому экземпляру не откуда ехать. Теперь док — сиблинг стека экранов,
+ * состояние (пружина скобы, compact) переживает смену экрана.
+ */
 function MenuNav({
   view,
+  screenKey,
   onNavigate,
   unreadTotal,
   onToggleNotifications,
 }: {
   view: View
+  /** Key текущей записи стека: смена экрана = новый ключ. */
+  screenKey: string
   onNavigate: (view: View) => void
   unreadTotal: number
   onToggleNotifications: () => void
 }) {
-  const topLevel: Record<string, View> = {
-    home: 'home',
-    new: 'new',
-    mine: 'mine',
-    chats: 'chats',
-    profile: 'profile',
-  }
   const items: MenuBarItem[] = NAV_ITEMS.map((item) => ({
     ...item,
-    active: topLevel[item.key] === view,
+    active: TOP_LEVEL[item.key] === view,
     badge: item.key === 'chats' && unreadTotal > 0 ? unreadTotal : undefined,
   }))
 
-  // Shrink the dock while scrolling down; it restores on scroll up (and on hover
-  // inside MenuBar itself).
+  // Shrink the dock while scrolling down; it restores on scroll up.
+  //
+  // Инстанс теперь один, поэтому слушатель перепривязывается на смене экрана
+  // (`screenKey`): `lastY` заново считается от фактического скролла (иначе
+  // первое движение после возврата на длинную ленту ошибётся направлением),
+  // а `compact` сбрасывается синхронно — не в эффекте, чтобы док не мигал
+  // сжатой полосой на первом кадре нового экрана.
   const [compact, setCompact] = useState(false)
+  const lastScreenKey = useRef(screenKey)
+  if (lastScreenKey.current !== screenKey) {
+    lastScreenKey.current = screenKey
+    setCompact(false)
+  }
+
   useEffect(() => {
     let lastY = window.scrollY
     let ticking = false
@@ -151,7 +225,7 @@ function MenuNav({
     }
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => window.removeEventListener('scroll', onScroll)
-  }, [])
+  }, [screenKey])
 
   return (
     <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2">
@@ -160,7 +234,7 @@ function MenuNav({
         compact={compact}
         onSelect={(key) => {
           if (key === 'chats') onToggleNotifications()
-          else onNavigate(topLevel[key])
+          else onNavigate(TOP_LEVEL[key])
         }}
       />
     </div>
@@ -179,24 +253,25 @@ function AppContent() {
   const unread = useUnreadCounts()
   const reducedMotion = useReducedMotion()
 
-  // Direction tracking: monotonic depth counter
-  const depthRef = useRef(0)
-  const prevDepthRef = useRef(0)
+  // Направление перехода: «вперёд» — push (и экран входа, открытый поверх
+  // текущего view), «назад» — back, отмена входа и reset при выходе из
+  // аккаунта. Считается здесь, в точке принятия решения о переходе: глубина
+  // стека для этого не нужна, а направление отката видно только из вызова.
+  const [direction, setDirection] = useState<PageDirection>('forward')
 
   const push = (view: View, params?: NavParams) => {
-    prevDepthRef.current = depthRef.current
-    depthRef.current++
+    setDirection('forward')
     navPush(view, params)
   }
 
   const goBack = () => {
-    prevDepthRef.current = depthRef.current
-    depthRef.current--
+    setDirection('back')
     back()
   }
 
   useEffect(() => {
     if (!session) {
+      setDirection('back')
       reset()
       // Выход из аккаунта: неотвеченный экран входа и незавершённое
       // resume-действие относились к прежней сессии — снимаем их.
@@ -227,10 +302,18 @@ function AppContent() {
     if (current.view === next) return
     const hint = AUTH_VIEW_HINTS[next]
     if (!session && hint) {
+      setDirection('forward')
       setAuthIntent({ view: next, hint })
       return
     }
     push(next)
+  }
+
+  // Направление перехода по экрану входа: сам он — не запись стека, поэтому
+  // признаки ставим вручную: открыли — «вперёд», отменили — «назад».
+  function closeAuth() {
+    setDirection('back')
+    setAuthIntent(null)
   }
 
   // Колбэк для экранных действий («Написать автору», «Пожаловаться»):
@@ -238,6 +321,7 @@ function AppContent() {
   // возвращается туда, где был, и (для resume) действие продолжается само.
   function requestAuth(opts: { hint: string; resume?: AuthResume }) {
     if (session) return
+    setDirection('forward')
     setAuthIntent({
       view: current.view,
       params: current.params,
@@ -258,6 +342,7 @@ function AppContent() {
 
   function toggleNotifications() {
     if (!session) {
+      setDirection('forward')
       setAuthIntent({
         view: 'chats',
         hint: AUTH_VIEW_HINTS.chats ?? 'Войдите, чтобы открыть чаты',
@@ -297,165 +382,145 @@ function AppContent() {
     </AppShell>
   )
 
+  // Единственный инстанс дока: рендерится ПОСЛЕ стека экранов и вне
+  // `PageTransition`. Условия те же, что были у семи блоков разметки:
+  // не экран входа, экран из DOCK_VIEWS, и для detail/thread — наличие
+  // своего параметра (без него страница не рендерилась, значит и дока нет).
+  const dockVisible =
+    !authActive &&
+    DOCK_VIEWS.includes(current.view) &&
+    (current.view !== 'detail' || Boolean(current.params.listingId)) &&
+    (current.view !== 'thread' || Boolean(current.params.chatId))
+
   return (
-    <PageStack animated={!reducedMotion}>
-      {current.view === 'privacy' && (
-        <PageTransition key={current.key}>
-          <Suspense fallback={SuspenseFallback}>
-            <LegalScreen doc="privacy" onBack={goBack} />
-          </Suspense>
-        </PageTransition>
-      )}
+    <>
+      <PageStack animated={!reducedMotion} direction={direction}>
+        {current.view === 'privacy' && (
+          <PageTransition key={current.key}>
+            <Suspense fallback={SuspenseFallback}>
+              <LegalScreen doc="privacy" onBack={goBack} />
+            </Suspense>
+          </PageTransition>
+        )}
 
-      {current.view === 'terms' && (
-        <PageTransition key={current.key}>
-          <Suspense fallback={SuspenseFallback}>
-            <LegalScreen doc="terms" onBack={goBack} />
-          </Suspense>
-        </PageTransition>
-      )}
+        {current.view === 'terms' && (
+          <PageTransition key={current.key}>
+            <Suspense fallback={SuspenseFallback}>
+              <LegalScreen doc="terms" onBack={goBack} />
+            </Suspense>
+          </PageTransition>
+        )}
 
-      {authActive && (
-        <PageTransition key={`auth:${current.key}`}>
-          <AuthScreen
-            hint={authIntent?.hint}
-            onBack={() => setAuthIntent(null)}
-            onOpenLegal={(legalView) => navigate(legalView)}
-          />
-        </PageTransition>
-      )}
+        {authActive && (
+          <PageTransition key={`auth:${current.key}`}>
+            <AuthScreen
+              hint={authIntent?.hint}
+              onBack={closeAuth}
+              onOpenLegal={(legalView) => navigate(legalView)}
+            />
+          </PageTransition>
+        )}
 
-      {!authActive && current.view === 'new' && (
-        <PageTransition key={current.key}>
-          <Suspense fallback={SuspenseFallback}>
+        {!authActive && current.view === 'new' && (
+          <PageTransition key={current.key}>
+            <Suspense fallback={SuspenseFallback}>
+              <AppShell>
+                <NewListing onSaved={() => navigate('mine')} onCancel={() => navigate('home')} />
+              </AppShell>
+            </Suspense>
+          </PageTransition>
+        )}
+
+        {!authActive && current.view === 'mine' && (
+          <PageTransition key={current.key}>
+            <Suspense fallback={SuspenseFallback}>
+              <AppShell>
+                <MyListingsScreen onBack={goBack} />
+              </AppShell>
+            </Suspense>
+          </PageTransition>
+        )}
+
+        {!authActive && current.view === 'detail' && current.params.listingId && (
+          <PageTransition key={current.key}>
+            <Suspense fallback={SuspenseFallback}>
+              <AppShell>
+                <ListingDetailScreen
+                  id={current.params.listingId}
+                  onBack={goBack}
+                  onStartChat={openChat}
+                  requireAuth={requestAuth}
+                  resumeStartChat={resumeChat}
+                />
+              </AppShell>
+            </Suspense>
+          </PageTransition>
+        )}
+
+        {!authActive && current.view === 'chats' && (
+          <PageTransition key={current.key}>
+            <Suspense fallback={SuspenseFallback}>
+              <AppShell>
+                <ChatsScreen
+                  onBack={goBack}
+                  unread={unread}
+                  onOpenChat={openChat}
+                  showNotifications={showNotifications}
+                  onCloseNotifications={() => setShowNotifications(false)}
+                />
+              </AppShell>
+            </Suspense>
+          </PageTransition>
+        )}
+        {!authActive && current.view === 'thread' && current.params.chatId && (
+          <PageTransition key={current.key}>
+            <Suspense fallback={SuspenseFallback}>
+              <AppShell>
+                <ThreadScreen chatId={current.params.chatId} onBack={goBack} />
+              </AppShell>
+            </Suspense>
+          </PageTransition>
+        )}
+
+        {!authActive && current.view === 'profile' && (
+          <PageTransition key={current.key}>
+            <Suspense fallback={SuspenseFallback}>
+              <AppShell>
+                <ProfileScreenWrapper onBack={goBack} />
+              </AppShell>
+            </Suspense>
+          </PageTransition>
+        )}
+
+        {!authActive && current.view === 'home' && (
+          <PageTransition key={current.key}>
             <AppShell>
-              <MenuNav
-                view={current.view}
-                onNavigate={navigate}
-                unreadTotal={unread.total}
-                onToggleNotifications={toggleNotifications}
-              />
-              <NewListing onSaved={() => navigate('mine')} onCancel={() => navigate('home')} />
-            </AppShell>
-          </Suspense>
-        </PageTransition>
-      )}
-
-      {!authActive && current.view === 'mine' && (
-        <PageTransition key={current.key}>
-          <Suspense fallback={SuspenseFallback}>
-            <AppShell>
-              <MenuNav
-                view={current.view}
-                onNavigate={navigate}
-                unreadTotal={unread.total}
-                onToggleNotifications={toggleNotifications}
-              />
-              <MyListingsScreen onBack={goBack} />
-            </AppShell>
-          </Suspense>
-        </PageTransition>
-      )}
-
-      {!authActive && current.view === 'detail' && current.params.listingId && (
-        <PageTransition key={current.key}>
-          <Suspense fallback={SuspenseFallback}>
-            <AppShell>
-              <MenuNav
-                view={current.view}
-                onNavigate={navigate}
-                unreadTotal={unread.total}
-                onToggleNotifications={toggleNotifications}
-              />
-              <ListingDetailScreen
-                id={current.params.listingId}
-                onBack={goBack}
-                onStartChat={openChat}
-                requireAuth={requestAuth}
-                resumeStartChat={resumeChat}
-              />
-            </AppShell>
-          </Suspense>
-        </PageTransition>
-      )}
-
-      {!authActive && current.view === 'chats' && (
-        <PageTransition key={current.key}>
-          <Suspense fallback={SuspenseFallback}>
-            <AppShell>
-              <MenuNav
-                view={current.view}
-                onNavigate={navigate}
-                unreadTotal={unread.total}
-                onToggleNotifications={toggleNotifications}
-              />
-              <ChatsScreen
-                onBack={goBack}
+              <HomeFeed
+                onOpen={openDetail}
+                onCreate={() => navigate('new')}
+                isAuthenticated={Boolean(user)}
+                userEmailConfirmed={Boolean(user?.email_confirmed_at)}
+                isSupabaseConfigured={isSupabaseConfigured()}
+                showNotifications={showNotifications}
                 unread={unread}
                 onOpenChat={openChat}
-                showNotifications={showNotifications}
                 onCloseNotifications={() => setShowNotifications(false)}
               />
             </AppShell>
-          </Suspense>
-        </PageTransition>
-      )}
-      {!authActive && current.view === 'thread' && current.params.chatId && (
-        <PageTransition key={current.key}>
-          <Suspense fallback={SuspenseFallback}>
-            <AppShell>
-              <MenuNav
-                view={current.view}
-                onNavigate={navigate}
-                unreadTotal={unread.total}
-                onToggleNotifications={toggleNotifications}
-              />
-              <ThreadScreen chatId={current.params.chatId} onBack={goBack} />
-            </AppShell>
-          </Suspense>
-        </PageTransition>
-      )}
+          </PageTransition>
+        )}
+      </PageStack>
 
-      {!authActive && current.view === 'profile' && (
-        <PageTransition key={current.key}>
-          <Suspense fallback={SuspenseFallback}>
-            <AppShell>
-              <MenuNav
-                view={current.view}
-                onNavigate={navigate}
-                unreadTotal={unread.total}
-                onToggleNotifications={toggleNotifications}
-              />
-              <ProfileScreenWrapper onBack={goBack} />
-            </AppShell>
-          </Suspense>
-        </PageTransition>
+      {dockVisible && (
+        <MenuNav
+          view={current.view}
+          screenKey={current.key}
+          onNavigate={navigate}
+          unreadTotal={unread.total}
+          onToggleNotifications={toggleNotifications}
+        />
       )}
-
-      {!authActive && current.view === 'home' && (
-        <PageTransition key={current.key}>
-          <AppShell>
-            <MenuNav
-              view={current.view}
-              onNavigate={navigate}
-              unreadTotal={unread.total}
-              onToggleNotifications={toggleNotifications}
-            />
-            <HomeFeed
-              onOpen={openDetail}
-              onCreate={() => navigate('new')}
-              isAuthenticated={Boolean(user)}
-              userEmailConfirmed={Boolean(user?.email_confirmed_at)}
-              isSupabaseConfigured={isSupabaseConfigured()}
-              showNotifications={showNotifications}
-              unread={unread}
-              onOpenChat={openChat}
-              onCloseNotifications={() => setShowNotifications(false)}
-            />
-          </AppShell>
-        </PageTransition>
-      )}
-    </PageStack>
+    </>
   )
 }
 
